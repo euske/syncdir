@@ -7,6 +7,7 @@ import hashlib
 import logging
 import cPickle as pickle
 
+
 # netstring(x)
 def netstring(x):
     if hasattr(x, '__iter__'):
@@ -294,44 +295,57 @@ class SyncDir(object):
 def main(argv):
     import getopt
     def usage():
-        print 'usage: %s [-d] [-n] [file ...]' % argv[0]
+        print 'usage: %s [-d] [-n] [-c cmdline] [-t user@host:port] [dir ...]' % argv[0]
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dn')
+        (opts, args) = getopt.getopt(argv[1:], 'dnc:t:')
     except getopt.GetoptError:
         return usage()
     #
     loglevel = logging.INFO
     logfile = None
     dryrun = False
+    username = None
+    cmdline = 'syncdir.py'
+    host = None
+    port = 22
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
         elif k == '-n': dryrun = True
+        elif k == '-c': cmdline = v
+        elif k == '-t':
+            (username,_,v) = v.partition('@')
+            (host,_,p) = v.partition(':')
+            if p:
+                port = int(p)
+    if not args: return usage()
+    
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
-    #
-    def mkpipe():
-        (fdr, fdw) = os.pipe()
-        pr = os.fdopen(fdr, 'rb')
-        pw = os.fdopen(fdw, 'wb')
-        return (pr,pw)
-    (p1_r, p1_w) = mkpipe()
-    (p2_r, p2_w) = mkpipe()
-    if os.fork():
-        p1_w.close()
-        p2_r.close()
-        name = 'SyncDir(%d)' % os.getpid()
-        logger = logging.getLogger(name)
-        sync = SyncDir(logger, p2_w, p1_r, dryrun=dryrun)
-        sync.run(args[0])
+    name = 'SyncDir(%d)' % os.getpid()
+    logger = logging.getLogger(name)
+    if username is not None and host is not None:
+        import paramiko
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        path = args.pop(0)
+        rargs = [cmdline]
+        if dryrun:
+            rargs.append('-n')
+        rargs.extend(path.split(os.path.sep))
+        logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
+        client.connect(host, port, username, allow_agent=True)
+        logging.info('exec_command: %r...' % rargs)
+        (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
+        sync = SyncDir(logger, stdin, stdout, dryrun=dryrun)
+        sync.run(unicode(path))
+        stdout.close()
+        stdin.close()
+        stderr.close()
     else:
-        p1_r.close()
-        p2_w.close()
-        name = 'SyncDir(%d)' % os.getpid()
-        logger = logging.getLogger(name)
-        sync = SyncDir(logger, p1_w, p2_r, dryrun=dryrun)
-        sync.run(args[1])
-        
+        sync = SyncDir(logger, sys.stdout, sys.stdin, dryrun=dryrun)
+        path = os.path.sep.join(args)
+        sync.run(unicode(path))
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
