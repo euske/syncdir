@@ -50,7 +50,6 @@ class NetstringParser(object):
         
     def _parse_sep(self, s, i):
         if s[i] != ':': raise SyntaxError(i)
-        self.results.append(self._length)
         self._parse = self._parse_data
         return i+1
         
@@ -74,9 +73,11 @@ class NetstringParser(object):
 class SyncDir(object):
 
     class ProtocolError(Exception): pass
-    
+
+    # bufsize_local: for scanning local files.
     bufsize_local = 65536
-    bufsize_remote = 4096
+    # bufsize_wire: for sending/receiving data over network.
+    bufsize_wire = 4096
 
     def __init__(self, logger, fp_send, fp_recv, dryrun=False):
         self.logger = logger
@@ -100,6 +101,23 @@ class SyncDir(object):
         x = self._fp_recv.read(n)
         #self.logger.debug(' recv: %r' % x)
         return x
+    
+    def _send_str(self, s):
+        self.logger.debug(' send_str: %r' % s)
+        self._send(netstring(s))
+        return
+    def _recv_str(self):
+        parser = NetstringParser()
+        while not parser.results:
+            c = self._recv(1)
+            if not c: raise self.ProtocolError
+            try:
+                parser.feed(c)
+            except SyntaxError:
+                raise self.ProtocolError
+        s = parser.results.pop()
+        self.logger.debug(' recv_str: %r' % s)
+        return s
 
     def _gen_list(self, basedir):
         for (dirpath,dirnames,filenames) in os.walk(basedir):
@@ -130,98 +148,78 @@ class SyncDir(object):
 
     def _send_list(self, basedir):
         send_files = {}
+        # Assuming each entry fits in one packet.
         for (relpath, size, mtime, digest) in self._gen_list(basedir):
             send_files[relpath] = (size, mtime, digest)
             obj = (relpath.split(os.path.sep), size, mtime, digest)
             s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-            self._send(netstring(s))
+            self._send_str(s)
             self._recv_list()
-        self._send(netstring(''))
-        while self._recv_phase == 0:
-            self._recv_list()
+        self._send_str('')
+        while self._recv_list():
+            pass
         return send_files
 
     def _recv_list(self):
-        if self._recv_phase != 0: return
-        parser = NetstringParser()
-        while len(parser.results) < 2:
-            c = self._recv(1)
-            if not c: raise self.ProtocolError
-            try:
-                parser.feed(c)
-            except SyntaxError:
-                raise self.ProtocolError
-        (n,s) = parser.results
-        if n == 0:
+        if self._recv_phase != 0: return False
+        # Assuming each entry fits in one packet.
+        s = self._recv_str()
+        if not s:
             self._recv_phase = 1
-            return
+            return False
         try:
             (p, size, mtime, digest) = pickle.loads(s)
             relpath = os.path.sep.join(p)
         except ValueError:
             raise self.ProtocolError
         self._recv_files[relpath] = (size, mtime, digest)
-        return
+        return True
 
     def _send_file(self, fp, size):
-        self._send('%s:' % size)
         while size:
-            bufsize = min(size, self.bufsize_remote)
+            # send one packet.
+            bufsize = min(size, self.bufsize_wire)
             data = fp.read(bufsize)
             if not data: raise self.ProtocolError('file size changed')
             size -= len(data)
             self._send(data)
             if 0 < size:
+                # receive one packet.
                 self._recv_file()
-        self._send(',')
         self._recv_file()
         return
 
     def _recv_file(self):
-        if self._rfile_parser is not None:
-            assert self._rfile_bytes is None
-            assert self._rfile_fp is None
-            c = self._recv(1)
-            if not c: raise self.ProtocolError
-            try:
-                self._rfile_parser.feed(c)
-            except SyntaxError:
-                raise self.ProtocolError
-            if len(self._rfile_parser.results) < 3: return True
-            (_, relpath, size) = self._rfile_parser.results
-            assert relpath in self._rfile_queue
-            self._rfile_queue.remove(relpath)
-            path = os.path.join(self._rfile_basedir, relpath)
-            self._rfile_parser = None
-            self._rfile_bytes = size
-            try:
-                self.logger.info('recv: %r (%s)' % (relpath, size))
-                if not self.dryrun:
-                    self._rfile_fp = open(path, 'wb')
-            except (IOError, OSError), e:
-                self.logger.error('recv: %r: %r' % (path, e))
-        assert self._rfile_parser is None
-
-        if  self._rfile_bytes is not None:
-            bufsize = min(self._rfile_bytes, self.bufsize_remote)
+        # process only one packet and return.
+        if self._rfile_bytes is not None:
+            bufsize = min(self._rfile_bytes, self.bufsize_wire)
+            data = self._recv(bufsize)
             self._rfile_bytes -= bufsize
             assert 0 <= self._rfile_bytes
-            data = self._recv(bufsize)
             if self._rfile_fp is not None:
                 self._rfile_fp.write(data)
             if 0 < self._rfile_bytes: return True
-            c = self._recv(1)
-            if c != ',': raise self.ProtocolError
             self._rfile_bytes = None
             if self._rfile_fp is not None:
                 self._rfile_fp.close()
                 self._rfile_fp = None
+            return True
         assert self._rfile_bytes is None
+        assert self._rfile_fp is None
         
         if self._rfile_queue:
-            assert self._rfile_parser is None
-            assert self._rfile_fp is None
-            self._rfile_parser = NetstringParser()
+            relpath = self._recv_str()
+            (size0,mtime0,digest0) = self._recv_files[relpath]
+            assert relpath in self._rfile_queue
+            self._rfile_queue.remove(relpath)
+            path = os.path.join(self._rfile_basedir, relpath)
+            self._rfile_bytes = size0
+            try:
+                self.logger.info('recv: %r (%s)' % (relpath, size0))
+                if not self.dryrun:
+                    self._rfile_fp = open(path, 'wb')
+            except (IOError, OSError), e:
+                self.logger.error('recv: %r: %r' % (path, e))
             return True
 
         assert not self._rfile_queue
@@ -270,16 +268,18 @@ class SyncDir(object):
                     self.logger.error('mkdir: %r: %r' % (path, e))
         # send/recv the files.
         self._rfile_basedir = basedir
-        self._rfile_parser = None
         self._rfile_bytes = None
         self._rfile_fp = None
         for relpath in (send_new + send_update):
-            self._send(netstring(relpath))
             path = os.path.join(basedir, relpath)
             try:
                 (size0,mtime0,digest0) = send_files[relpath]
                 self.logger.info('send: %r (%s)' % (relpath, size0))
                 fp = open(path, 'rb')
+                # send one packet.
+                self._send_str(relpath)
+                # receive one packet.
+                self._recv_file()
                 try:
                     self._send_file(fp, size0)
                 finally:
