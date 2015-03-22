@@ -120,6 +120,14 @@ class SyncDir(object):
         self.logger.debug(' recv_str: %r' % s)
         return s
 
+    def _send_obj(self, obj):
+        s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
+        self._send_str(s)
+        return
+    def _recv_obj(self):
+        s = self._recv_str()
+        return pickle.loads(s)
+    
     def _gen_list(self, basedir):
         for (dirpath,dirnames,filenames) in os.walk(basedir):
             dirnames[:] = [ name for name in dirnames
@@ -151,29 +159,30 @@ class SyncDir(object):
         send_files = {}
         # Assuming each entry fits in one packet.
         for (relpath, size, mtime, digest) in self._gen_list(basedir):
-            send_files[relpath] = (size, mtime, digest)
-            obj = (relpath.split(os.path.sep), size, mtime, digest)
-            s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-            self._send_str(s)
-            self._recv_list()
-        self._send_str('')
-        while self._recv_list():
+            k = tuple(relpath.split(os.path.sep))
+            path = os.path.join(basedir, relpath)
+            send_files[k] = (path, size, mtime, digest)
+            self._send_obj((k, size, mtime, digest))
+            self._recv_list(basedir)
+        self._send_obj(None)
+        while self._recv_list(basedir):
             pass
         return send_files
 
-    def _recv_list(self):
+    def _recv_list(self, basedir):
         if self._recv_phase != 0: return False
         # Assuming each entry fits in one packet.
-        s = self._recv_str()
-        if not s:
+        obj = self._recv_obj()
+        if obj is None:
             self._recv_phase = 1
             return False
         try:
-            (p, size, mtime, digest) = pickle.loads(s)
-            relpath = os.path.sep.join(p)
+            (k, size, mtime, digest) = obj
+            relpath = os.path.sep.join(k)
+            path = os.path.join(basedir, relpath)
         except ValueError:
             raise self.ProtocolError
-        self._recv_files[relpath] = (size, mtime, digest)
+        self._recv_files[k] = (path, size, mtime, digest)
         return True
 
     def _send_file(self, fp, size):
@@ -209,14 +218,13 @@ class SyncDir(object):
         assert self._rfile_fp is None
         
         if self._rfile_queue:
-            relpath = self._recv_str()
-            (size0,mtime0,digest0) = self._recv_files[relpath]
-            assert relpath in self._rfile_queue
-            self._rfile_queue.remove(relpath)
-            path = os.path.join(self._rfile_basedir, relpath)
+            k = self._recv_obj()
+            (path,size0,mtime0,digest0) = self._recv_files[k]
+            assert k in self._rfile_queue
+            self._rfile_queue.remove(k)
             self._rfile_bytes = size0
             try:
-                self.logger.info('recv: %r (%s)' % (relpath, size0))
+                self.logger.info('recv: %r (%s)' % (path, size0))
                 if not self.dryrun:
                     self._rfile_fp = open(path, 'wb')
             except (IOError, OSError), e:
@@ -237,48 +245,48 @@ class SyncDir(object):
         recv_new = []
         send_update = []
         recv_update = []
-        for (relpath,(size0,mtime0,digest0)) in send_files.iteritems():
-            if relpath in self._recv_files:
-                (size1,mtime1,digest1) = self._recv_files[relpath]
+        for (k,(path,size0,mtime0,digest0)) in send_files.iteritems():
+            if k in self._recv_files:
+                (_,size1,mtime1,digest1) = self._recv_files[k]
                 if digest0 != digest1:
-                    if mtime0 < mtime1:
-                        send_update.append(relpath)
+                    if mtime1 < mtime0:
+                        send_update.append(k)
                     else:
-                        recv_update.append(relpath)
+                        recv_update.append(k)
             else:
-                send_new.append(relpath)
-        for relpath in self._recv_files.iterkeys():
-            if relpath not in send_files:
-                recv_new.append(relpath)
+                send_new.append(k)
+        for k in self._recv_files.iterkeys():
+            if k not in send_files:
+                recv_new.append(k)
         self.logger.info('sending: %d new, %d update...' %
                          (len(send_new), len(send_update)))
         self.logger.info('receiving: %d new, %d update...' %
                          (len(recv_new), len(recv_update)))
         # create receiving directories.
         self._rfile_queue = set(recv_new + recv_update)
-        dirs = set( os.path.dirname(relpath) for relpath in self._rfile_queue )
-        for dirpath in dirs:
-            if not dirpath: continue
-            path = os.path.join(basedir, dirpath)
+        dirs = set()
+        for k in self._rfile_queue:
+            if k in dirs: continue
+            dirs.add(k)
+            (path,_,_,_) = self._recv_files[k]
+            path = os.path.dirname(path)
             if os.path.isdir(path): continue
-            self.logger.info('mkdir: %r' % dirpath)
+            self.logger.info('mkdir: %r' % path)
             if not self.dryrun:
                 try:
                     os.makedirs(path)
                 except OSError, e:
                     self.logger.error('mkdir: %r: %r' % (path, e))
         # send/recv the files.
-        self._rfile_basedir = basedir
         self._rfile_bytes = None
         self._rfile_fp = None
-        for relpath in (send_new + send_update):
-            path = os.path.join(basedir, relpath)
+        for k in (send_new + send_update):
             try:
-                (size0,mtime0,digest0) = send_files[relpath]
-                self.logger.info('send: %r (%s)' % (relpath, size0))
+                (path,size0,mtime0,digest0) = send_files[k]
+                self.logger.info('send: %r (%s)' % (path, size0))
                 fp = open(path, 'rb')
                 # send one packet.
-                self._send_str(relpath)
+                self._send_obj(k)
                 # receive one packet.
                 self._recv_file()
                 try:
