@@ -3,6 +3,7 @@ import sys
 import os
 import os.path
 import stat
+import time
 import hashlib
 import logging
 import cPickle as pickle
@@ -80,15 +81,20 @@ class SyncDir(object):
     # bufsize_wire: for sending/receiving data over network.
     bufsize_wire = 4096
 
-    def __init__(self, logger, fp_send, fp_recv, dryrun=False):
+    def __init__(self, logger, fp_send, fp_recv,
+                 dryrun=False, backupdir=None, trashdir=None):
         self.logger = logger
         self.dryrun = dryrun
+        self.backupdir = backupdir
+        self.trashdir = trashdir
         self._fp_send = fp_send
         self._fp_recv = fp_recv
         return
 
     def is_dir_valid(self, dirpath, name):
-        return not name.startswith('.')
+        return (not name.startswith('.') and
+                (name != self.backupdir and
+                 name != self.trashdir))
     
     def is_file_valid(self, dirpath, name):
         return not name.startswith('.')
@@ -211,8 +217,16 @@ class SyncDir(object):
             if 0 < self._rfile_bytes: return True
             self._rfile_bytes = None
             if self._rfile_fp is not None:
+                path = self._rfile_fp.name
                 self._rfile_fp.close()
                 self._rfile_fp = None
+                if (self.backupdir is not None and
+                    os.path.isfile(self._rfile_path)):
+                    self._backup_file(self._rfile_path)
+                try:
+                    os.rename(path, self._rfile_path)
+                except (IOError, OSError), e:
+                    self.logger.error('recv: rename %r: %r' % (path, e))
             return True
         assert self._rfile_bytes is None
         assert self._rfile_fp is None
@@ -223,16 +237,37 @@ class SyncDir(object):
             assert k in self._rfile_queue
             self._rfile_queue.remove(k)
             self._rfile_bytes = size0
+            self._rfile_path = path
             try:
                 self.logger.info('recv: %r (%s)' % (path, size0))
                 if not self.dryrun:
-                    self._rfile_fp = open(path, 'wb')
+                    tmppath = os.path.join(os.path.dirname(path),
+                                           'tmp'+digest0.encode('hex'))
+                    self._rfile_fp = open(tmppath, 'wb')
             except (IOError, OSError), e:
                 self.logger.error('recv: %r: %r' % (path, e))
             return True
 
         assert not self._rfile_queue
         return False
+
+    def _backup_file(self, path):
+        assert self.backupdir is not None
+        backupdir = os.path.join(os.path.dirname(path), self.backupdir)
+        if not os.path.isdir(backupdir):
+            try:
+                os.mkdir(backupdir)
+            except (IOError, OSError), e:
+                self.logger.error('recv: mkdir %r: %r' % (backupdir, e))
+                return
+        try:
+            timestamp = time.strftime('%Y%m%d%H%M%S')
+            name = os.path.basename(path)+'.backup'+timestamp
+            dstpath = os.path.join(backupdir, name)
+            os.rename(path, dstpath)
+        except (IOError, OSError), e:
+            self.logger.error('recv: backup %r -> %r: %r' % (path, dstpath, e))
+        return
 
     def run(self, basedir):
         self.logger.info('listing: %r...' % basedir)
@@ -303,30 +338,45 @@ class SyncDir(object):
 def main(argv):
     import getopt
     def usage():
-        print 'usage: %s [-d] [-n] [-c cmdline] [-t user@host:port] [dir ...]' % argv[0]
+        print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
+               '[-n] [-B backupdir] [-T trashdir] '
+               '[dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dnc:t:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:nB:T:')
     except getopt.GetoptError:
         return usage()
     #
     loglevel = logging.INFO
     logfile = None
-    dryrun = False
-    username = None
-    cmdline = 'syncdir.py'
     host = None
     port = 22
+    username = None
+    cmdline = 'syncdir.py'
+    ropts = []
+    dryrun = False
+    backupdir = None
+    trashdir = None
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
-        elif k == '-n': dryrun = True
-        elif k == '-c': cmdline = v
-        elif k == '-t':
+        elif k == '-p':
             (username,_,v) = v.partition('@')
-            (host,_,p) = v.partition(':')
-            if p:
-                port = int(p)
+            (host,_,v) = v.partition(':')
+            if v:
+                port = int(v)
+        elif k == '-c': cmdline = v
+        elif k == '-n':
+            dryrun = True
+            ropts.append(k)
+        elif k == '-B':
+            backupdir = v
+            ropts.append(k)
+            ropts.append(v)
+        elif k == '-T':
+            trashdir = v
+            ropts.append(k)
+            ropts.append(v)
     if not args: return usage()
     
     logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
@@ -337,21 +387,20 @@ def main(argv):
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         path = args.pop(0)
-        rargs = [cmdline]
-        if dryrun:
-            rargs.append('-n')
-        rargs.extend(path.split(os.path.sep))
+        rargs = [cmdline]+ropts+path.split(os.path.sep)
         logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
         client.connect(host, port, username, allow_agent=True)
         logging.info('exec_command: %r...' % rargs)
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
-        sync = SyncDir(logger, stdin, stdout, dryrun=dryrun)
+        sync = SyncDir(logger, stdin, stdout,
+                       dryrun=dryrun, backupdir=backupdir, trashdir=trashdir)
         sync.run(unicode(path))
         stdout.close()
         stdin.close()
         stderr.close()
     else:
-        sync = SyncDir(logger, sys.stdout, sys.stdin, dryrun=dryrun)
+        sync = SyncDir(logger, sys.stdout, sys.stdin,
+                       dryrun=dryrun, backupdir=backupdir, trashdir=trashdir)
         path = os.path.sep.join(args)
         sync.run(unicode(path))
     return 0
