@@ -22,11 +22,12 @@ class SyncDir(object):
     bufsize_wire = 4096
 
     def __init__(self, logger, fp_send, fp_recv,
-                 dryrun=False, ignore=None,
+                 dryrun=False, ignorecase=False, ignorefiles=None,
                  backupdir=None, trashdir=None):
         self.logger = logger
         self.dryrun = dryrun
-        self.ignore = ignore
+        self.ignorecase = ignorecase
+        self.ignorefiles = ignorefiles
         self.backupdir = backupdir
         self.trashdir = trashdir
         self._fp_send = fp_send
@@ -40,10 +41,16 @@ class SyncDir(object):
     
     def is_file_valid(self, dirpath, name):
         if name.startswith('.'): return False
-        if self.ignore:
+        if self.ignorefiles:
             (_,_,ext) = name.rpartition('.')
-            if ext in self.ignore: return False
+            if ext in self.ignorefiles: return False
         return True
+
+    def _getkey(self, keys):
+        if self.ignorecase:
+            return tuple( v.lower() for v in keys )
+        else:
+            return keys
 
     def _send(self, x):
         #self.logger.debug(' send: %r' % x)
@@ -110,10 +117,11 @@ class SyncDir(object):
         # Assuming each entry fits in one packet.
         for (relpath, size, mtime, digest) in self._gen_list(basedir):
             self.logger.debug(' send_list: %r' % relpath)
-            k = tuple(relpath.split(os.path.sep))
+            keys = tuple(relpath.split(os.path.sep))
             path = os.path.join(basedir, relpath)
+            k = self._getkey(keys)
             send_files[k] = (path, size, mtime, digest)
-            self._send_obj((k, size, mtime, digest))
+            self._send_obj((keys, size, mtime, digest))
             self._recv_list(basedir)
         self._send_obj(None)
         while self._recv_list(basedir):
@@ -128,12 +136,13 @@ class SyncDir(object):
             self._recv_phase = 1
             return False
         try:
-            (k, size, mtime, digest) = obj
-            relpath = os.path.sep.join(k)
+            (keys, size, mtime, digest) = obj
+            relpath = os.path.sep.join(keys)
             path = os.path.join(basedir, relpath)
             self.logger.debug(' recv_list: %r' % relpath)
         except ValueError:
             raise self.ProtocolError
+        k = self._getkey(keys)
         self._recv_files[k] = (path, size, mtime, digest)
         return True
 
@@ -327,11 +336,11 @@ def main(argv):
     import getopt
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
-               '[-n] [-I exts] [-B backupdir] [-T trashdir] '
+               '[-n] [-i] [-I exts] [-B backupdir] [-T trashdir] '
                '[dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:nI:B:T:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:B:T:')
     except getopt.GetoptError:
         return usage()
     #
@@ -343,7 +352,8 @@ def main(argv):
     cmdline = 'syncdir.py'
     ropts = []
     dryrun = False
-    ignore = set()
+    ignorecase = False
+    ignorefiles = set()
     backupdir = None
     trashdir = None
     for (k, v) in opts:
@@ -358,8 +368,11 @@ def main(argv):
         elif k == '-n':
             dryrun = True
             ropts.append(k)
+        elif k == '-i':
+            ignorecase = True
+            ropts.append(k)
         elif k == '-I':
-            ignore.update(v.split(','))
+            ignorefiles.update(v.split(','))
             ropts.append(k)
             ropts.append(v)
         elif k == '-B':
@@ -386,7 +399,8 @@ def main(argv):
         logging.info('exec_command: %r...' % rargs)
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
         sync = SyncDir(logger, stdin, stdout,
-                       dryrun=dryrun, ignore=ignore,
+                       dryrun=dryrun, ignorecase=ignorecase,
+                       ignorefiles=ignorefiles,
                        backupdir=backupdir, trashdir=trashdir)
         sync.run(unicode(path))
         stdout.close()
@@ -394,7 +408,8 @@ def main(argv):
         stderr.close()
     else:
         sync = SyncDir(logger, sys.stdout, sys.stdin,
-                       dryrun=dryrun, ignore=ignore,
+                       dryrun=dryrun, ignorecase=ignorecase,
+                       ignorefiles=ignorefiles,
                        backupdir=backupdir, trashdir=trashdir)
         path = os.path.sep.join(args)
         sync.run(unicode(path))

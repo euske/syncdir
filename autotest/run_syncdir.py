@@ -12,11 +12,11 @@ def getpipe():
 def main(argv):
     import getopt
     def usage():
-        print ('usage: %s [-c cmdline] [-d] [-n] [-I exts] [-B backupdir] [-T trashdir] '
+        print ('usage: %s [-c cmdline] [-d] [-n] [-i] [-I exts] [-B backupdir] [-T trashdir] '
                'src dst' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'c:dnI:B:T:')
+        (opts, args) = getopt.getopt(argv[1:], 'c:dniI:B:T:')
     except getopt.GetoptError:
         return usage()
     ropts = []
@@ -27,6 +27,8 @@ def main(argv):
         elif k == '-d':
             ropts.append(k)
         elif k == '-n':
+            ropts.append(k)
+        elif k == '-i':
             ropts.append(k)
         elif k == '-I':
             ropts.append(k)
