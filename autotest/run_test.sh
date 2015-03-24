@@ -72,9 +72,12 @@ mv $D1/foo $D1/_trash/foo
 mv $D1/ttt $D1/_trash/ttt
 mv $D2/bar $D2/_trash/bar
 $SYNCDIR $D1 $D2
-[ ! -f $D2/foo ] || exit 501
-[ ! -f $D2/ttt ] || exit 502
-[ ! -f $D1/bar ] || exit 503
+[ ! -f $D1/_trash/foo ] || exit 501
+[ ! -f $D1/_trash/ttt/t ] || exit 502
+[ ! -f $D2/_trash/bar ] || exit 503
+[ ! -f $D2/foo ] || exit 504
+[ ! -f $D2/ttt ] || exit 505
+[ ! -f $D1/bar ] || exit 506
 sleep 1
 
 # cleanup
