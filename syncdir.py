@@ -56,7 +56,8 @@ class SyncDir(object):
         return x
     
     def _send_obj(self, obj):
-        self.logger.debug(' send_obj: %r' % (obj,))
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(' send_obj: %r' % (obj,))
         s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
         self._send('+'+struct.pack('<i', len(s))+s)
         return
@@ -66,10 +67,11 @@ class SyncDir(object):
         (n,) = struct.unpack('<xi', x)
         s = self._recv(n)
         obj = pickle.loads(s)
-        self.logger.debug(' recv_obj: %r' % (obj,))
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(' recv_obj: %r' % (obj,))
         return obj
     
-    def _gen_list(self, basedir):
+    def _gen_list(self, basedir, intrash=False):
         for (dirpath,dirnames,filenames) in os.walk(basedir):
             dirnames[:] = [ name for name in dirnames
                             if self.is_dir_valid(dirpath, name) ]
@@ -89,17 +91,25 @@ class SyncDir(object):
                             if not data: break
                             h.update(data)
                         relpath = os.path.relpath(path, basedir)
+                        if intrash:
+                            st_size = st_mtime = None
                         yield (relpath, st_size, st_mtime, h.digest())
                     finally:
                         fp.close()
                 except (IOError, OSError):
                     pass
+            # List trashed files.
+            if not intrash and self.trashdir is not None:
+                trashdir = os.path.join(dirpath, self.trashdir)
+                for x in self._gen_list(trashdir, intrash=True):
+                    yield x
         return
 
     def _send_list(self, basedir):
         send_files = {}
         # Assuming each entry fits in one packet.
         for (relpath, size, mtime, digest) in self._gen_list(basedir):
+            self.logger.debug(' send_list: %r' % relpath)
             k = tuple(relpath.split(os.path.sep))
             path = os.path.join(basedir, relpath)
             send_files[k] = (path, size, mtime, digest)
@@ -121,6 +131,7 @@ class SyncDir(object):
             (k, size, mtime, digest) = obj
             relpath = os.path.sep.join(k)
             path = os.path.join(basedir, relpath)
+            self.logger.debug(' recv_list: %r' % relpath)
         except ValueError:
             raise self.ProtocolError
         self._recv_files[k] = (path, size, mtime, digest)
@@ -128,7 +139,7 @@ class SyncDir(object):
 
     def _send_file(self, fp, size):
         while size:
-            # send one packet.
+            # Send one packet.
             bufsize = min(size, self.bufsize_wire)
             data = fp.read(bufsize)
             if not data: raise self.ProtocolError('file size changed')
@@ -141,8 +152,9 @@ class SyncDir(object):
         return
 
     def _recv_file(self):
-        # process only one packet and return.
+        # Process only one packet and return.
         if self._rfile_bytes is not None:
+            # receive a portion of a file.
             bufsize = min(self._rfile_bytes, self.bufsize_wire)
             data = self._recv(bufsize)
             self._rfile_bytes -= bufsize
@@ -150,6 +162,7 @@ class SyncDir(object):
             if self._rfile_fp is not None:
                 self._rfile_fp.write(data)
             if 0 < self._rfile_bytes: return True
+            # finish receiving a file.
             self._rfile_bytes = None
             if self._rfile_fp is not None:
                 path = self._rfile_fp.name
@@ -167,6 +180,7 @@ class SyncDir(object):
         assert self._rfile_fp is None
         
         if self._rfile_queue:
+            # setup a new file to receive.
             k = self._recv_obj()
             (path,size0,mtime0,digest0) = self._recv_files[k]
             assert k in self._rfile_queue
@@ -215,23 +229,49 @@ class SyncDir(object):
         recv_new = []
         send_update = []
         recv_update = []
-        for (k,(path,size0,mtime0,digest0)) in send_files.iteritems():
+        trashed = []
+        for (k,(path0,size0,mtime0,digest0)) in send_files.iteritems():
             if k in self._recv_files:
-                (_,size1,mtime1,digest1) = self._recv_files[k]
+                (path1,size1,mtime1,digest1) = self._recv_files[k]
                 if digest0 != digest1:
-                    if mtime1 < mtime0:
+                    if mtime0 is None and mtime1 is None:
+                        # both files are trashed.
+                        pass
+                    elif mtime1 is None:
+                        # the obsolete receiver file is trashed.
+                        send_update.append(k)
+                    elif mtime0 is None:
+                        # the obsolete sender file is trashed.
+                        recv_update.append(k)
+                    elif mtime1 < mtime0:
+                        # the sender file is newer.
                         send_update.append(k)
                     else:
+                        # the receiver file is newer.
                         recv_update.append(k)
+                else:
+                    if mtime0 is not None and mtime1 is None:
+                        # the receiver file is trashed.
+                        trashed.append(path0)
             else:
-                send_new.append(k)
-        for k in self._recv_files.iterkeys():
+                if mtime0 is not None:
+                    send_new.append(k)
+        for (k,(path1,size1,mtime1,digest1)) in self._recv_files.iteritems():
             if k not in send_files:
-                recv_new.append(k)
+                if mtime1 is not None:
+                    recv_new.append(k)
         self.logger.info('sending: %d new, %d update...' %
                          (len(send_new), len(send_update)))
-        self.logger.info('receiving: %d new, %d update...' %
-                         (len(recv_new), len(recv_update)))
+        self.logger.info('receiving: %d new, %d update, %d trashed...' %
+                         (len(recv_new), len(recv_update), len(trashed)))
+        # deleting files.
+        for path in trashed:
+            self.logger.info('removing: %r' % path)
+            if not self.dryrun:
+                if self.backupdir is not None:
+                    self._backup_file(path, 'trash')
+                else:
+                    os.remove(path)
         # create receiving directories.
         self._rfile_queue = set(recv_new + recv_update)
         dirs = set()
