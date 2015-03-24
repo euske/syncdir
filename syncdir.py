@@ -22,9 +22,11 @@ class SyncDir(object):
     bufsize_wire = 4096
 
     def __init__(self, logger, fp_send, fp_recv,
-                 dryrun=False, backupdir=None, trashdir=None):
+                 dryrun=False, ignore=None,
+                 backupdir=None, trashdir=None):
         self.logger = logger
         self.dryrun = dryrun
+        self.ignore = ignore
         self.backupdir = backupdir
         self.trashdir = trashdir
         self._fp_send = fp_send
@@ -32,12 +34,16 @@ class SyncDir(object):
         return
 
     def is_dir_valid(self, dirpath, name):
-        return (not name.startswith('.') and
-                (name != self.backupdir and
-                 name != self.trashdir))
+        if name.startswith('.'): return False
+        if name == self.backupdir or name == self.trashdir: return False
+        return True
     
     def is_file_valid(self, dirpath, name):
-        return not name.startswith('.')
+        if name.startswith('.'): return False
+        if self.ignore:
+            (_,_,ext) = name.rpartition('.')
+            if ext in self.ignore: return False
+        return True
 
     def _send(self, x):
         #self.logger.debug(' send: %r' % x)
@@ -268,11 +274,11 @@ def main(argv):
     import getopt
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
-               '[-n] [-B backupdir] [-T trashdir] '
+               '[-n] [-I exts] [-B backupdir] [-T trashdir] '
                '[dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:nB:T:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:nI:B:T:')
     except getopt.GetoptError:
         return usage()
     #
@@ -284,6 +290,7 @@ def main(argv):
     cmdline = 'syncdir.py'
     ropts = []
     dryrun = False
+    ignore = set()
     backupdir = None
     trashdir = None
     for (k, v) in opts:
@@ -298,6 +305,10 @@ def main(argv):
         elif k == '-n':
             dryrun = True
             ropts.append(k)
+        elif k == '-I':
+            ignore.update(v.split(','))
+            ropts.append(k)
+            ropts.append(v)
         elif k == '-B':
             backupdir = v
             ropts.append(k)
@@ -322,14 +333,16 @@ def main(argv):
         logging.info('exec_command: %r...' % rargs)
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
         sync = SyncDir(logger, stdin, stdout,
-                       dryrun=dryrun, backupdir=backupdir, trashdir=trashdir)
+                       dryrun=dryrun, ignore=ignore,
+                       backupdir=backupdir, trashdir=trashdir)
         sync.run(unicode(path))
         stdout.close()
         stdin.close()
         stderr.close()
     else:
         sync = SyncDir(logger, sys.stdout, sys.stdin,
-                       dryrun=dryrun, backupdir=backupdir, trashdir=trashdir)
+                       dryrun=dryrun, ignore=ignore,
+                       backupdir=backupdir, trashdir=trashdir)
         path = os.path.sep.join(args)
         sync.run(unicode(path))
     return 0
