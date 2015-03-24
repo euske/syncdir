@@ -137,17 +137,21 @@ class SyncDir(object):
         self._recv_files[k] = (path, size, mtime, digest)
         return True
 
-    def _send_file(self, fp, size):
+    def _send_file(self, fp, size, digest):
+        h = hashlib.md5()
         while size:
             # Send one packet.
             bufsize = min(size, self.bufsize_wire)
             data = fp.read(bufsize)
-            if not data: raise self.ProtocolError('file size changed')
+            if not data: raise self.ProtocolError('file size is changed')
+            h.update(data)
             size -= len(data)
             self._send(data)
             if 0 < size:
                 # receive one packet.
                 self._recv_file()
+        if digest != h.digest():
+            raise self.ProtocolError('sending file is changed')
         self._recv_file()
         return
 
@@ -159,22 +163,28 @@ class SyncDir(object):
             data = self._recv(bufsize)
             self._rfile_bytes -= bufsize
             assert 0 <= self._rfile_bytes
+            assert self._rfile_hash is not None
+            self._rfile_hash.update(data)
             if self._rfile_fp is not None:
                 self._rfile_fp.write(data)
             if 0 < self._rfile_bytes: return True
             # finish receiving a file.
             self._rfile_bytes = None
             if self._rfile_fp is not None:
-                path = self._rfile_fp.name
+                assert self._rfile_info is not None
+                (dstpath,digest) = self._rfile_info
+                tmppath = self._rfile_fp.name
+                if digest != self._rfile_hash.digest():
+                    raise self.ProtocolError('received file is different')
                 self._rfile_fp.close()
                 self._rfile_fp = None
                 if (self.backupdir is not None and
-                    os.path.isfile(self._rfile_path)):
-                    self._backup_file(self._rfile_path, 'backup')
+                    os.path.isfile(dstpath)):
+                    self._backup_file(dstpath, 'backup')
                 try:
-                    os.rename(path, self._rfile_path)
+                    os.rename(tmppath, dstpath)
                 except (IOError, OSError), e:
-                    self.logger.error('recv: rename %r: %r' % (path, e))
+                    self.logger.error('recv: rename %r: %r' % (dstpath, e))
             return True
         assert self._rfile_bytes is None
         assert self._rfile_fp is None
@@ -185,8 +195,9 @@ class SyncDir(object):
             (path,size0,mtime0,digest0) = self._recv_files[k]
             assert k in self._rfile_queue
             self._rfile_queue.remove(k)
+            self._rfile_info = (path, digest0)
             self._rfile_bytes = size0
-            self._rfile_path = path
+            self._rfile_hash = hashlib.md5()
             try:
                 self.logger.info('recv: %r (%s)' % (path, size0))
                 if not self.dryrun:
@@ -288,7 +299,9 @@ class SyncDir(object):
                 except OSError, e:
                     self.logger.error('mkdir: %r: %r' % (path, e))
         # send/recv the files.
+        self._rfile_info = None
         self._rfile_bytes = None
+        self._rfile_hash = None
         self._rfile_fp = None
         for k in (send_new + send_update):
             try:
@@ -300,7 +313,7 @@ class SyncDir(object):
                 # receive one packet.
                 self._recv_file()
                 try:
-                    self._send_file(fp, size0)
+                    self._send_file(fp, size0, digest0)
                 finally:
                     fp.close()
             except (IOError, OSError), e:
