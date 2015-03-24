@@ -6,68 +6,8 @@ import stat
 import time
 import hashlib
 import logging
+import struct
 import cPickle as pickle
-
-
-# netstring(x)
-def netstring(x):
-    if hasattr(x, '__iter__'):
-        return ''.join( netstring(y) for y in x )
-    else:
-        x = str(x)   
-        return '%d:%s,' % (len(x), x)
-
-
-##  NetstringParser
-##
-class NetstringParser(object):
-    
-    def __init__(self):
-        self.results = []
-        self.reset()
-        return
-
-    def reset(self):
-        self._data = ''
-        self._length = 0
-        self._parse = self._parse_len
-        return
-        
-    def feed(self, s):
-        i = 0
-        while i < len(s):
-            i = self._parse(s, i)
-        return
-        
-    def _parse_len(self, s, i):
-        while i < len(s):
-            c = s[i]
-            if c < '0' or '9' < c:
-                self._parse = self._parse_sep
-                break
-            self._length *= 10
-            self._length += ord(c)-48
-            i += 1
-        return i
-        
-    def _parse_sep(self, s, i):
-        if s[i] != ':': raise SyntaxError(i)
-        self._parse = self._parse_data
-        return i+1
-        
-    def _parse_data(self, s, i):
-        n = min(self._length, len(s)-i)
-        self._data += s[i:i+n]
-        self._length -= n
-        if self._length == 0:
-            self._parse = self._parse_end
-        return i+n
-        
-    def _parse_end(self, s, i):
-        if s[i] != ',': raise SyntaxError(i)
-        self.results.append(self._data)
-        self.reset()
-        return i+1
 
 
 ##  SyncDir
@@ -109,30 +49,19 @@ class SyncDir(object):
         #self.logger.debug(' recv: %r' % x)
         return x
     
-    def _send_str(self, s):
-        self.logger.debug(' send_str: %r' % s)
-        self._send(netstring(s))
-        return
-    def _recv_str(self):
-        parser = NetstringParser()
-        while not parser.results:
-            c = self._recv(1)
-            if not c: raise self.ProtocolError
-            try:
-                parser.feed(c)
-            except SyntaxError:
-                raise self.ProtocolError
-        s = parser.results.pop()
-        self.logger.debug(' recv_str: %r' % s)
-        return s
-
     def _send_obj(self, obj):
+        self.logger.debug(' send_obj: %r' % (obj,))
         s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-        self._send_str(s)
+        self._send('+'+struct.pack('<i', len(s))+s)
         return
     def _recv_obj(self):
-        s = self._recv_str()
-        return pickle.loads(s)
+        x = self._recv(5)
+        if not x.startswith('+'): raise self.ProtocolError
+        (n,) = struct.unpack('<xi', x)
+        s = self._recv(n)
+        obj = pickle.loads(s)
+        self.logger.debug(' recv_obj: %r' % (obj,))
+        return obj
     
     def _gen_list(self, basedir):
         for (dirpath,dirnames,filenames) in os.walk(basedir):
