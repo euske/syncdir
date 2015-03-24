@@ -222,7 +222,7 @@ class SyncDir(object):
                 self._rfile_fp = None
                 if (self.backupdir is not None and
                     os.path.isfile(self._rfile_path)):
-                    self._backup_file(self._rfile_path)
+                    self._backup_file(self._rfile_path, 'backup')
                 try:
                     os.rename(path, self._rfile_path)
                 except (IOError, OSError), e:
@@ -251,7 +251,7 @@ class SyncDir(object):
         assert not self._rfile_queue
         return False
 
-    def _backup_file(self, path):
+    def _backup_file(self, path, prefix):
         assert self.backupdir is not None
         backupdir = os.path.join(os.path.dirname(path), self.backupdir)
         if not os.path.isdir(backupdir):
@@ -262,7 +262,7 @@ class SyncDir(object):
                 return
         try:
             timestamp = time.strftime('%Y%m%d%H%M%S')
-            name = os.path.basename(path)+'.backup'+timestamp
+            name = os.path.basename(path)+'.'+prefix+'.'+timestamp
             dstpath = os.path.join(backupdir, name)
             os.rename(path, dstpath)
         except (IOError, OSError), e:
