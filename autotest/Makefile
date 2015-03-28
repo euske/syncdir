@@ -1,7 +1,5 @@
 # Makefile
 
-all:
-
 test:
 	./run_test.sh
 

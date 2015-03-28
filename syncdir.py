@@ -106,7 +106,7 @@ class SyncDir(object):
                 except (IOError, OSError):
                     pass
             # List trashed files.
-            if trashbase is None and self.trashdir is not None:
+            if self.trashdir and trashbase is None:
                 trashdir = os.path.join(dirpath, self.trashdir)
                 for x in self._gen_list(trashdir, trashbase=dirpath):
                     yield x
@@ -187,8 +187,7 @@ class SyncDir(object):
                     raise self.ProtocolError('received file is different')
                 self._rfile_fp.close()
                 self._rfile_fp = None
-                if (self.backupdir is not None and
-                    os.path.isfile(dstpath)):
+                if self.backupdir and os.path.isfile(dstpath):
                     self._backup_file(os.path.dirname(dstpath), dstpath, 'backup')
                 try:
                     os.rename(tmppath, dstpath)
@@ -221,7 +220,7 @@ class SyncDir(object):
         return False
 
     def _backup_file(self, backupbase, path, prefix):
-        assert self.backupdir is not None
+        assert self.backupdir
         backupdir = os.path.join(backupbase, self.backupdir)
         if not os.path.isdir(backupdir):
             try:
@@ -278,7 +277,7 @@ class SyncDir(object):
                     send_new.append(k)
             if trashbase0 is not None:
                 # clean up the sending trashed file.
-                assert self.trashdir is not None
+                assert self.trashdir
                 trashdir = os.path.join(trashbase0, self.trashdir)
                 path = os.path.join(trashdir, os.path.relpath(path0, trashbase0))
                 trashed.append((trashbase0, path))
@@ -294,7 +293,7 @@ class SyncDir(object):
         for (backupbase,path) in trashed:
             self.logger.info('removing: %r' % path)
             if not self.dryrun:
-                if self.backupdir is not None:
+                if self.backupdir:
                     self._backup_file(backupbase, path, 'trash')
                 else:
                     os.remove(path)
@@ -362,8 +361,8 @@ def main(argv):
     dryrun = False
     ignorecase = False
     ignorefiles = set()
-    backupdir = None
-    trashdir = None
+    backupdir = '.backup'
+    trashdir = '.trash'
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v

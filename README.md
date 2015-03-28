@@ -6,8 +6,8 @@ Yet another rsync-like program written in Python.
 (Originally tried to port rsync to Python but gave up.)
 
 TODO:
- * file extention filtering.
- * file deletion / backup.
+ * source code cleanup.
+ * better documentation.
 
 
 Terms and Conditions
