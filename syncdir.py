@@ -78,7 +78,7 @@ class SyncDir(object):
             self.logger.debug(' recv_obj: %r' % (obj,))
         return obj
     
-    def _gen_list(self, basedir, trashbase=None):
+    def _gen_list(self, basedir, intrash=False):
         for (dirpath,dirnames,filenames) in os.walk(basedir):
             dirnames[:] = [ name for name in dirnames
                             if self.is_dir_valid(dirpath, name) ]
@@ -98,18 +98,18 @@ class SyncDir(object):
                             if not data: break
                             h.update(data)
                         relpath = os.path.relpath(path, basedir)
-                        if trashbase is not None:
-                            st_size = st_mtime = None
-                        yield (relpath, trashbase, st_size, st_mtime, h.digest())
+                        yield (relpath, None, st_size, st_mtime, h.digest())
                     finally:
                         fp.close()
                 except (IOError, OSError):
                     pass
             # List trashed files.
-            if self.trashdir and trashbase is None:
+            if self.trashdir and not intrash:
                 trashdir = os.path.join(dirpath, self.trashdir)
-                for x in self._gen_list(trashdir, trashbase=dirpath):
-                    yield x
+                trashrel = os.path.relpath(dirpath, basedir)
+                for (relpath,_,size,mtime,digest) in self._gen_list(trashdir, intrash=True):
+                    relpath = os.path.join(trashrel, relpath)
+                    yield (relpath, dirpath, None, None, digest)
         return
 
     def _send_list(self, basedir):
