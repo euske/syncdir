@@ -9,6 +9,12 @@ import logging
 import struct
 import cPickle as pickle
 
+SEP = '/'
+def path2keys(path):
+    return SEP.join(path.split(os.path.sep))
+def keys2path(keys):
+    return os.path.sep.join(keys.split(SEP))
+
 
 ##  SyncDir
 ##
@@ -117,7 +123,7 @@ class SyncDir(object):
         # Assuming each entry fits in one packet.
         for (relpath, trashbase, size, mtime, digest) in self._gen_list(basedir):
             self.logger.debug(' send_list: %r' % relpath)
-            keys = tuple(relpath.split(os.path.sep))
+            keys = path2keys(relpath)
             path = os.path.join(basedir, relpath)
             k = self._getkey(keys)
             send_files[k] = (path, trashbase, size, mtime, digest)
@@ -137,7 +143,7 @@ class SyncDir(object):
             return False
         try:
             (keys, size, mtime, digest) = obj
-            relpath = os.path.sep.join(keys)
+            relpath = keys2path(keys)
             path = os.path.join(basedir, relpath)
             self.logger.debug(' recv_list: %r' % relpath)
         except ValueError:
