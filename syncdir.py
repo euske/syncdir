@@ -405,7 +405,7 @@ def main(argv):
         import paramiko
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        rargs = [cmdline]+ropts+args
+        rargs = [cmdline]+ropts+map(path2keys, args)
         logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
         client.connect(host, port, username, allow_agent=True)
         logging.info('exec_command: %r...' % rargs)
@@ -425,7 +425,7 @@ def main(argv):
                        ignorefiles=ignorefiles,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
-            sync.run(unicode(arg1))
+            sync.run(unicode(keys2path(arg1)))
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
