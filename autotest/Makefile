@@ -1,7 +1,8 @@
 # Makefile
+SH=sh
 
 test:
-	./run_test.sh
+	$(SH) ./run_test.sh
 
 clean:
 	$(RM) -r testdir.*
