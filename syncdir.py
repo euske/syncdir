@@ -124,7 +124,6 @@ class SyncDir(object):
                             if trashbase is not None:
                                 # the file is in trash.
                                 st_size = st_mtime = None
-                                print >>sys.stderr, (relpath1, trashbase, trashrel1)
                             yield (relpath1, trashbase, trashrel1,
                                    st_size, st_mtime, h.digest())
                         finally:
@@ -298,8 +297,8 @@ class SyncDir(object):
             if mtime0 is None:
                 # clean up the sending trashed file.
                 assert self.trashdir
-                print >>sys.stderr, 'cleanup:', (trashbase0, trashrel0)
-                trashed.append((trashbase0, trashrel0))
+                relpath = os.path.join(trashbase0, os.path.join(self.trashdir, trashrel0))
+                trashed.append((trashbase0, relpath))
         for (k,(_,_,mtime1,_)) in self._recv_files.iteritems():
             if k not in send_files:
                 if mtime1 is not None:
