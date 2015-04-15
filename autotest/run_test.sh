@@ -157,9 +157,7 @@ mkdir $D2/_trash
 mv $D1/foo $D1/_trash/foo
 mv $D1/ttt $D1/_trash/ttt
 mv $D2/bar $D2/_trash/bar
-find $D1 $D2
 $SYNCDIR $D1 $D2
-find $D1 $D2
 [ ! -f $D1/_trash/foo ] || exit 501
 [ ! -f $D1/_trash/ttt/t ] || exit 502
 [ ! -f $D2/_trash/bar ] || exit 503
