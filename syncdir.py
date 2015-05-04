@@ -7,7 +7,7 @@ import time
 import hashlib
 import logging
 import struct
-import cPickle as pickle
+import marshal
 
 SEP = '/'
 def path2keys(path):
@@ -71,7 +71,7 @@ class SyncDir(object):
     def _send_obj(self, obj):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(' send_obj: %r' % (obj,))
-        s = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
+        s = marshal.dumps(obj)
         self._send('+'+struct.pack('<i', len(s))+s)
         return
     def _recv_obj(self):
@@ -79,7 +79,7 @@ class SyncDir(object):
         if not x.startswith('+'): raise self.ProtocolError
         (n,) = struct.unpack('<xi', x)
         s = self._recv(n)
-        obj = pickle.loads(s)
+        obj = marshal.loads(s)
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(' recv_obj: %r' % (obj,))
         return obj
