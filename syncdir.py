@@ -28,12 +28,15 @@ class SyncDir(object):
     bufsize_wire = 4096
 
     def __init__(self, logger, fp_send, fp_recv,
-                 dryrun=False, ignorecase=False, ignorefiles=None,
+                 dryrun=False, ignorecase=False, ignoreexts=None,
+                 excludedirs=None, followlink=False,
                  backupdir=None, trashdir=None):
         self.logger = logger
         self.dryrun = dryrun
         self.ignorecase = ignorecase
-        self.ignorefiles = ignorefiles
+        self.ignoreexts = ignoreexts
+        self.excludedirs = excludedirs
+        self.followlink = followlink
         self.backupdir = backupdir
         self.trashdir = trashdir
         self._fp_send = fp_send
@@ -43,13 +46,15 @@ class SyncDir(object):
     def is_dir_valid(self, dirpath, name):
         if name.startswith('.'): return False
         if name == self.backupdir or name == self.trashdir: return False
+        if self.excludedirs:
+            if name in self.excludedirs: return False
         return True
     
     def is_file_valid(self, dirpath, name):
         if name.startswith('.'): return False
-        if self.ignorefiles:
+        if self.ignoreexts:
             (_,_,ext) = name.rpartition('.')
-            if ext in self.ignorefiles: return False
+            if ext in self.ignoreexts: return False
         return True
 
     def _getkey(self, keys):
@@ -98,7 +103,10 @@ class SyncDir(object):
                     trashrel1 = None
                 else:
                     trashrel1 = os.path.join(trashrel0, name)
-                if os.path.isdir(path1):
+                if not self.followlink and os.path.islink(path1):
+                    # is a symlink (and ignored).
+                    pass
+                elif os.path.isdir(path1):
                     # is a directory.
                     if name == self.trashdir and trashbase is None:
                         # List trashed files.
@@ -363,11 +371,11 @@ def main(argv):
     import getopt
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
-               '[-n] [-i] [-I exts] [-B backupdir] [-T trashdir] '
+               '[-n] [-i] [-I exts] [-E dirs] [-L] [-B backupdir] [-T trashdir] '
                '[dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:B:T:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:E:LB:T:')
     except getopt.GetoptError:
         return usage()
     #
@@ -380,7 +388,9 @@ def main(argv):
     ropts = []
     dryrun = False
     ignorecase = False
-    ignorefiles = set()
+    ignoreexts = set()
+    excludedirs = set()
+    followlink = True
     backupdir = '.backup'
     trashdir = '.trash'
     for (k, v) in opts:
@@ -399,9 +409,16 @@ def main(argv):
             ignorecase = True
             ropts.append(k)
         elif k == '-I':
-            ignorefiles.update(v.split(','))
+            ignoreexts.update(v.split(','))
             ropts.append(k)
             ropts.append(v)
+        elif k == '-E':
+            excludedirs.update(v.split(','))
+            ropts.append(k)
+            ropts.append(v)
+        elif k == '-L':
+            followlink = True
+            ropts.append(k)
         elif k == '-B':
             backupdir = v
             ropts.append(k)
@@ -426,7 +443,8 @@ def main(argv):
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
         sync = SyncDir(logger, stdin, stdout,
                        dryrun=dryrun, ignorecase=ignorecase,
-                       ignorefiles=ignorefiles,
+                       ignoreexts=ignoreexts, excludedirs=excludedirs,
+                       followlink=followlink,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(unicode(arg1))
@@ -436,7 +454,8 @@ def main(argv):
     else:
         sync = SyncDir(logger, sys.stdout, sys.stdin,
                        dryrun=dryrun, ignorecase=ignorecase,
-                       ignorefiles=ignorefiles,
+                       ignoreexts=ignoreexts, excludedirs=excludedirs,
+                       followlink=followlink,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(unicode(keys2path(arg1)))
