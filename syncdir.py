@@ -390,7 +390,7 @@ def main(argv):
     ignorecase = False
     ignoreexts = set()
     excludedirs = set()
-    followlink = True
+    followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
     for (k, v) in opts:
