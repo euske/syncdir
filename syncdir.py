@@ -97,7 +97,12 @@ class SyncDir(object):
             else:
                 trashpath = os.path.join(self.trashdir, trashrel0)
                 path0 = os.path.join(basedir, os.path.join(trashbase, trashpath))
-            for name in os.listdir(path0):
+            try:
+                files = os.listdir(path0)
+            except OSError, e:
+                self.logger.error('walk: not found: %r: %r' % (path0, e))
+                return
+            for name in files:
                 try:
                     name = unicode(name)
                 except UnicodeError, e:
