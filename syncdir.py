@@ -95,8 +95,14 @@ class SyncDir(object):
             if trashbase is None:
                 path0 = os.path.join(basedir, relpath0)
             else:
-                path0 = os.path.join(basedir, os.path.join(trashbase, os.path.join(self.trashdir, trashrel0)))
+                trashpath = os.path.join(self.trashdir, trashrel0)
+                path0 = os.path.join(basedir, os.path.join(trashbase, trashpath))
             for name in os.listdir(path0):
+                try:
+                    name = unicode(name)
+                except UnicodeError, e:
+                    self.logger.error('walk: decode error: %r: %r' % (name, e))
+                    continue
                 path1 = os.path.join(path0, name)
                 relpath1 = os.path.join(relpath0, name)
                 if trashrel0 is None:
@@ -265,6 +271,7 @@ class SyncDir(object):
         return
 
     def run(self, basedir):
+        basedir = unicode(basedir)
         self.logger.info('listing: %r...' % basedir)
         # send/recv the file list.
         self._recv_phase = 0
@@ -447,7 +454,7 @@ def main(argv):
                        followlink=followlink,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
-            sync.run(unicode(arg1))
+            sync.run(arg1)
         stdout.close()
         stdin.close()
         stderr.close()
@@ -458,7 +465,7 @@ def main(argv):
                        followlink=followlink,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
-            sync.run(unicode(keys2path(arg1)))
+            sync.run(keys2path(arg1))
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
