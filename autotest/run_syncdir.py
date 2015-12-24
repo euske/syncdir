@@ -46,7 +46,7 @@ def main(argv):
     (p1r,p1w) = getpipe()
     (p2r,p2w) = getpipe()
     rargs = [sys.executable,cmdline]+ropts
-    print >>sys.stderr, 'running:', rargs
+    sys.stderr.write('running: %r\n' % rargs)
     proc1 = subprocess.Popen(rargs+[src], stdin=p1r, stdout=p2w)
     proc2 = subprocess.Popen(rargs+[dst], stdin=p2r, stdout=p1w)
     proc1.wait()

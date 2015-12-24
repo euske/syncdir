@@ -8,6 +8,7 @@ import hashlib
 import logging
 import struct
 import marshal
+import binascii
 
 SEP = '/'
 def path2keys(path):
@@ -30,7 +31,7 @@ class SyncDir(object):
     def __init__(self, logger, fp_send, fp_recv,
                  dryrun=False, ignorecase=False, ignoreexts=None,
                  excludedirs=None, followlink=False,
-                 backupdir=None, trashdir=None):
+                 backupdir=None, trashdir=None, codec='utf-8'):
         self.logger = logger
         self.dryrun = dryrun
         self.ignorecase = ignorecase
@@ -39,6 +40,7 @@ class SyncDir(object):
         self.followlink = followlink
         self.backupdir = backupdir
         self.trashdir = trashdir
+        self.codec = codec
         self._fp_send = fp_send
         self._fp_recv = fp_recv
         return
@@ -77,11 +79,11 @@ class SyncDir(object):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(' send_obj: %r' % (obj,))
         s = marshal.dumps(obj)
-        self._send('+'+struct.pack('<i', len(s))+s)
+        self._send(b'+'+struct.pack('<i', len(s))+s)
         return
     def _recv_obj(self):
         x = self._recv(5)
-        if not x.startswith('+'): raise self.ProtocolError
+        if not x.startswith(b'+'): raise self.ProtocolError
         (n,) = struct.unpack('<xi', x)
         s = self._recv(n)
         obj = marshal.loads(s)
@@ -99,15 +101,10 @@ class SyncDir(object):
                 path0 = os.path.join(basedir, os.path.join(trashbase, trashpath))
             try:
                 files = os.listdir(path0)
-            except OSError, e:
+            except OSError as e:
                 self.logger.error('walk: not found: %r: %r' % (path0, e))
                 return
             for name in files:
-                try:
-                    name = unicode(name)
-                except UnicodeError, e:
-                    self.logger.error('walk: decode error: %r: %r' % (name, e))
-                    continue
                 path1 = os.path.join(path0, name)
                 relpath1 = os.path.join(relpath0, name)
                 if trashrel0 is None:
@@ -228,7 +225,7 @@ class SyncDir(object):
                     self._backup_file(os.path.dirname(dstpath), dstpath, 'backup')
                 try:
                     os.rename(tmppath, dstpath)
-                except (IOError, OSError), e:
+                except (IOError, OSError) as e:
                     self.logger.error('recv: rename %r: %r' % (dstpath, e))
             return True
         assert self._rfile_bytes is None
@@ -248,9 +245,9 @@ class SyncDir(object):
                 self.logger.info('recv: %r (%s)' % (relpath0, size0))
                 if not self.dryrun:
                     tmppath = os.path.join(os.path.dirname(path),
-                                           'tmp'+digest0.encode('hex'))
+                                           'tmp'+binascii.hexlify(digest0).decode('ascii'))
                     self._rfile_fp = open(tmppath, 'wb')
-            except (IOError, OSError), e:
+            except (IOError, OSError) as e:
                 self.logger.error('recv: %r: %r' % (path, e))
             return True
 
@@ -263,7 +260,7 @@ class SyncDir(object):
         if not os.path.isdir(backupdir):
             try:
                 os.mkdir(backupdir)
-            except (IOError, OSError), e:
+            except (IOError, OSError) as e:
                 self.logger.error('recv: mkdir %r: %r' % (backupdir, e))
                 return
         try:
@@ -271,12 +268,11 @@ class SyncDir(object):
             name = os.path.basename(path)+'.'+prefix+'.'+timestamp
             dstpath = os.path.join(backupdir, name)
             os.rename(path, dstpath)
-        except (IOError, OSError), e:
+        except (IOError, OSError) as e:
             self.logger.error('recv: backup %r -> %r: %r' % (path, dstpath, e))
         return
 
     def run(self, basedir):
-        basedir = unicode(basedir)
         self.logger.info('listing: %r...' % basedir)
         # send/recv the file list.
         self._recv_phase = 0
@@ -288,7 +284,7 @@ class SyncDir(object):
         send_update = []
         recv_update = []
         trashed = []
-        for (k,(relpath0,trashbase0,trashrel0,size0,mtime0,digest0)) in send_files.iteritems():
+        for (k,(relpath0,trashbase0,trashrel0,size0,mtime0,digest0)) in send_files.items():
             if k in self._recv_files:
                 (relpath1,size1,mtime1,digest1) = self._recv_files[k]
                 if digest0 != digest1:
@@ -319,7 +315,7 @@ class SyncDir(object):
                 assert self.trashdir
                 relpath = os.path.join(trashbase0, os.path.join(self.trashdir, trashrel0))
                 trashed.append((trashbase0, relpath))
-        for (k,(_,_,mtime1,_)) in self._recv_files.iteritems():
+        for (k,(_,_,mtime1,_)) in self._recv_files.items():
             if k not in send_files:
                 if mtime1 is not None:
                     recv_new.append(k)
@@ -349,7 +345,7 @@ class SyncDir(object):
             if not self.dryrun:
                 try:
                     os.makedirs(path)
-                except OSError, e:
+                except OSError as e:
                     self.logger.error('mkdir: %r: %r' % (path, e))
         # send/recv the files.
         self._rfile_info = None
@@ -372,7 +368,7 @@ class SyncDir(object):
                     self._send_file(basedir, fp, size0, digest0)
                 finally:
                     fp.close()
-            except (IOError, OSError), e:
+            except (IOError, OSError) as e:
                 self.logger.error('send: %r: %r' % (path, e))
         while self._recv_file(basedir):
             pass
@@ -464,7 +460,7 @@ def main(argv):
         stdin.close()
         stderr.close()
     else:
-        sync = SyncDir(logger, sys.stdout, sys.stdin,
+        sync = SyncDir(logger, sys.stdout.buffer, sys.stdin.buffer,
                        dryrun=dryrun, ignorecase=ignorecase,
                        ignoreexts=ignoreexts, excludedirs=excludedirs,
                        followlink=followlink,

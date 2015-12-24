@@ -1,5 +1,5 @@
 #!/bin/sh
-PYTHON=python2
+PYTHON=python3
 SYNCDIR="$PYTHON run_syncdir.py -c../syncdir.py -i -B_backup -T_trash"
 TESTBASE=testdir
 
