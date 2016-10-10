@@ -242,7 +242,7 @@ class SyncDir(object):
             self._rfile_bytes = size0
             self._rfile_hash = hashlib.md5()
             try:
-                self.logger.info('recv: %r (%s)' % (relpath0, size0))
+                self.logger.info('recv: %r (%s)' % (path, size0))
                 if not self.dryrun:
                     tmppath = os.path.join(os.path.dirname(path),
                                            'tmp'+binascii.hexlify(digest0).decode('ascii'))
@@ -325,9 +325,9 @@ class SyncDir(object):
                          (len(recv_new), len(recv_update), len(trashed)))
         # deleting files.
         for (backupbase,relpath) in trashed:
-            self.logger.info('removing: %r' % relpath)
+            path = os.path.join(basedir, relpath)
+            self.logger.info('removing: %r' % path)
             if not self.dryrun:
-                path = os.path.join(basedir, relpath)
                 if self.backupdir:
                     self._backup_file(os.path.join(basedir, backupbase), path, 'trash')
                 else:
@@ -437,14 +437,14 @@ def main(argv):
             ropts.append(v)
     if not args: return usage()
     
-    logging.basicConfig(level=loglevel, filename=logfile, filemode='a')
+    logging.basicConfig(level=loglevel, filename=logfile)
     name = 'SyncDir(%d)' % os.getpid()
     logger = logging.getLogger(name)
     if username is not None and host is not None:
         import paramiko
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        rargs = [cmdline]+ropts+map(path2keys, args)
+        rargs = [cmdline]+ropts+list(map(path2keys, args))
         logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
         client.connect(host, port, username, allow_agent=True)
         logging.info('exec_command: %r...' % rargs)
