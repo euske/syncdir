@@ -1,6 +1,6 @@
 #!/bin/sh
 PYTHON=python3
-SYNCDIR="$PYTHON run_syncdir.py -c../syncdir.py -i -B_backup -T_trash"
+SYNCDIR="$PYTHON run_syncdir.py -c../syncdir3.py -i -B_backup -T_trash"
 TESTBASE=testdir
 
 # Create test directories

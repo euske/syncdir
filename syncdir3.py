@@ -2,8 +2,10 @@
 import sys
 import os
 import os.path
+import re
 import stat
 import time
+import fnmatch
 import hashlib
 import logging
 import struct
@@ -17,9 +19,29 @@ def keys2path(keys):
     return os.path.sep.join(keys.split(SEP))
 
 
+##  ExcludeDB
+##
+class ExcludeDB:
+
+    def __init__(self):
+        self.globalpat = []
+        self.localpat = {}
+        return
+
+    def add_global(self, name):
+        pat = fnmatch.translate(name)
+        self.globalpat.append(re.compile(pat))
+        return
+
+    def is_excluded(self, name):
+        for pat in self.globalpat:
+            if pat.match(name): return True
+        return False
+
+
 ##  SyncDir
 ##
-class SyncDir(object):
+class SyncDir:
 
     class ProtocolError(Exception): pass
 
@@ -29,14 +51,14 @@ class SyncDir(object):
     bufsize_wire = 4096
 
     def __init__(self, logger, fp_send, fp_recv,
-                 dryrun=False, ignorecase=False, ignoreexts=None,
-                 excludedirs=None, followlink=False,
+                 dryrun=False, configfile=None, excldb=None,
+                 ignorecase=False, followlink=False, 
                  backupdir=None, trashdir=None, codec='utf-8'):
         self.logger = logger
         self.dryrun = dryrun
+        self.configfile = configfile
+        self.excldb = excldb
         self.ignorecase = ignorecase
-        self.ignoreexts = ignoreexts
-        self.excludedirs = excludedirs
         self.followlink = followlink
         self.backupdir = backupdir
         self.trashdir = trashdir
@@ -48,15 +70,14 @@ class SyncDir(object):
     def is_dir_valid(self, dirpath, name):
         if name.startswith('.'): return False
         if name == self.backupdir or name == self.trashdir: return False
-        if self.excludedirs:
-            if name in self.excludedirs: return False
+        if self.excldb is not None:
+            if self.excldb.is_excluded(name): return False
         return True
     
     def is_file_valid(self, dirpath, name):
         if name.startswith('.'): return False
-        if self.ignoreexts:
-            (_,_,ext) = name.rpartition('.')
-            if ext in self.ignoreexts: return False
+        if self.excldb is not None:
+            if self.excldb.is_excluded(name): return False
         return True
 
     def _getkey(self, keys):
@@ -380,10 +401,10 @@ def main(argv):
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
                '[-n] [-i] [-I exts] [-E dirs] [-L] [-B backupdir] [-T trashdir] '
-               '[dir ...]' % argv[0])
+               '[-C configfile] [dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:E:LB:T:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:E:LB:T:C:')
     except getopt.GetoptError:
         return usage()
     #
@@ -396,11 +417,11 @@ def main(argv):
     ropts = []
     dryrun = False
     ignorecase = False
-    ignoreexts = set()
-    excludedirs = set()
     followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
+    configfile = '.ignore'
+    excldb = ExcludeDB()
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
         elif k == '-l': logfile = v
@@ -417,11 +438,13 @@ def main(argv):
             ignorecase = True
             ropts.append(k)
         elif k == '-I':
-            ignoreexts.update(v.split(','))
+            for ext in v.split(','):
+                excldb.add_global('*.'+ext)
             ropts.append(k)
             ropts.append(v)
         elif k == '-E':
-            excludedirs.update(v.split(','))
+            for name in v.split(','):
+                excldb.add_global(name)
             ropts.append(k)
             ropts.append(v)
         elif k == '-L':
@@ -433,6 +456,10 @@ def main(argv):
             ropts.append(v)
         elif k == '-T':
             trashdir = v
+            ropts.append(k)
+            ropts.append(v)
+        elif k == '-C':
+            configfile = v
             ropts.append(k)
             ropts.append(v)
     if not args: return usage()
@@ -450,9 +477,8 @@ def main(argv):
         logging.info('exec_command: %r...' % rargs)
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
         sync = SyncDir(logger, stdin, stdout,
-                       dryrun=dryrun, ignorecase=ignorecase,
-                       ignoreexts=ignoreexts, excludedirs=excludedirs,
-                       followlink=followlink,
+                       dryrun=dryrun, configfile=configfile, excldb=excldb,
+                       ignorecase=ignorecase, followlink=followlink, 
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(arg1)
@@ -461,9 +487,8 @@ def main(argv):
         stderr.close()
     else:
         sync = SyncDir(logger, sys.stdout.buffer, sys.stdin.buffer,
-                       dryrun=dryrun, ignorecase=ignorecase,
-                       ignoreexts=ignoreexts, excludedirs=excludedirs,
-                       followlink=followlink,
+                       dryrun=dryrun, configfile=configfile, excldb=excldb,
+                       ignorecase=ignorecase, followlink=followlink, 
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(keys2path(arg1))
