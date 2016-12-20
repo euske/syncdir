@@ -151,8 +151,7 @@ class SyncDir:
                         st = os.stat(path1)
                         st_size = st[stat.ST_SIZE]
                         st_mtime = st[stat.ST_MTIME]
-                        fp = open(path1, 'rb')
-                        try:
+                        with open(path1, 'rb') as fp:
                             h = hashlib.md5()
                             while True:
                                 data = fp.read(self.bufsize_local)
@@ -163,8 +162,6 @@ class SyncDir:
                                 st_size = st_mtime = None
                             yield (relpath1, trashbase, trashrel1,
                                    st_size, st_mtime, h.digest())
-                        finally:
-                            fp.close()
                     except (IOError, OSError):
                         pass
         return walk('.')
@@ -380,15 +377,12 @@ class SyncDir:
                 assert mtime0 is not None
                 path = os.path.join(basedir, relpath0)
                 self.logger.info('send: %r (%s)' % (path, size0))
-                fp = open(path, 'rb')
-                # send one packet.
-                self._send_obj(k)
-                # receive one packet.
-                self._recv_file(basedir)
-                try:
+                with open(path, 'rb') as fp:
+                    # send one packet.
+                    self._send_obj(k)
+                    # receive one packet.
+                    self._recv_file(basedir)
                     self._send_file(basedir, fp, size0, digest0)
-                finally:
-                    fp.close()
             except (IOError, OSError) as e:
                 self.logger.error('send: %r: %r' % (path, e))
         while self._recv_file(basedir):
