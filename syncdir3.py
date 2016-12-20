@@ -28,14 +28,30 @@ class ExcludeDB:
         self.localpat = {}
         return
 
-    def add_global(self, name):
-        pat = fnmatch.translate(name)
-        self.globalpat.append(re.compile(pat))
+    def add_global(self, pat):
+        regex = fnmatch.translate(pat)
+        self.globalpat.append((pat, re.compile(regex)))
         return
 
-    def is_excluded(self, name):
-        for pat in self.globalpat:
-            if pat.match(name): return True
+    def clear_locals(self):
+        self.localpat.clear()
+        return
+
+    def add_local(self, dirpath, pat):
+        if dirpath in self.localpat:
+            pats = self.localpat[dirpath]
+        else:
+            pats = self.localpat[dirpath] = []
+        regex = fnmatch.translate(pat)
+        pats.append((pat, re.compile(regex)))
+        return
+
+    def is_excluded(self, dirpath, name):
+        for (_,regex) in self.globalpat:
+            if regex.match(name): return True
+        if dirpath in self.localpat:
+            for (_,regex) in self.localpat[dirpath]:
+                if regex.match(name): return True
         return False
 
 
@@ -71,13 +87,14 @@ class SyncDir:
         if name.startswith('.'): return False
         if name == self.backupdir or name == self.trashdir: return False
         if self.excldb is not None:
-            if self.excldb.is_excluded(name): return False
+            if self.excldb.is_excluded(dirpath, name): return False
         return True
     
     def is_file_valid(self, dirpath, name):
         if name.startswith('.'): return False
+        if name == self.configfile: return False
         if self.excldb is not None:
-            if self.excldb.is_excluded(name): return False
+            if self.excldb.is_excluded(dirpath, name): return False
         return True
 
     def _getkey(self, keys):
@@ -112,6 +129,37 @@ class SyncDir:
             self.logger.debug(' recv_obj: %r' % (obj,))
         return obj
     
+    def _read_config(self, basedir):
+        self.excldb.clear_locals()
+        def walk(relpath0):
+            path0 = os.path.join(basedir, relpath0)
+            try:
+                files = os.listdir(path0)
+            except OSError as e:
+                self.logger.error('walk: not found: %r: %r' % (path0, e))
+                return
+            for name in files:
+                path1 = os.path.join(path0, name)
+                relpath1 = os.path.join(relpath0, name)
+                if not self.followlink and os.path.islink(path1):
+                    # is a symlink (and ignored).
+                    pass
+                elif name.startswith('.'):
+                    pass
+                elif os.path.isdir(path1):
+                    # is a directory.
+                    if name == self.backupdir or name == self.trashdir: 
+                        pass
+                    else:
+                        walk(relpath1)
+                elif name == self.configfile:
+                    # load a config file.
+                    with open(path1) as fp:
+                        for line in fp:
+                            self.excldb.add_local(relpath1, line.strip())
+        walk('.')
+        return
+
     def _gen_list(self, basedir):
         def walk(relpath0, trashbase=None, trashrel0=None):
             # trashbase: the original dirname of a trashed file.
@@ -292,6 +340,8 @@ class SyncDir:
 
     def run(self, basedir):
         self.logger.info('listing: %r...' % basedir)
+        # read the config files.
+        self._read_config(basedir)
         # send/recv the file list.
         self._recv_phase = 0
         self._recv_files = {}
