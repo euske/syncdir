@@ -37,20 +37,22 @@ class ExcludeDB:
         self.localpat.clear()
         return
 
-    def add_local(self, dirpath, pat):
-        if dirpath in self.localpat:
-            pats = self.localpat[dirpath]
+    def add_local(self, k, pats):
+        if k in self.localpat:
+            pats0 = self.localpat[dirpath]
         else:
-            pats = self.localpat[dirpath] = []
-        regex = fnmatch.translate(pat)
-        pats.append((pat, re.compile(regex)))
+            pats0 = self.localpat[dirpath] = {}
+        for pat in pats:
+            if pat in pats0: continue
+            regex = fnmatch.translate(pat)
+            pats0[pat] = re.compile(regex)
         return
 
-    def is_excluded(self, dirpath, name):
+    def is_excluded(self, k, name):
         for (_,regex) in self.globalpat:
             if regex.match(name): return True
-        if dirpath in self.localpat:
-            for (_,regex) in self.localpat[dirpath]:
+        if k in self.localpat:
+            for regex in self.localpat[k].values():
                 if regex.match(name): return True
         return False
 
@@ -83,18 +85,18 @@ class SyncDir:
         self._fp_recv = fp_recv
         return
 
-    def is_dir_valid(self, dirpath, name):
+    def is_dir_valid(self, k, name):
         if name.startswith('.'): return False
         if name == self.backupdir or name == self.trashdir: return False
         if self.excldb is not None:
-            if self.excldb.is_excluded(dirpath, name): return False
+            if self.excldb.is_excluded(k, name): return False
         return True
     
-    def is_file_valid(self, dirpath, name):
+    def is_file_valid(self, k, name):
         if name.startswith('.'): return False
         if name == self.configfile: return False
         if self.excldb is not None:
-            if self.excldb.is_excluded(dirpath, name): return False
+            if self.excldb.is_excluded(k, name): return False
         return True
 
     def _getkey(self, keys):
@@ -130,7 +132,6 @@ class SyncDir:
         return obj
     
     def _read_config(self, basedir):
-        self.excldb.clear_locals()
         def walk(relpath0):
             path0 = os.path.join(basedir, relpath0)
             try:
@@ -151,14 +152,43 @@ class SyncDir:
                     if name == self.backupdir or name == self.trashdir: 
                         pass
                     else:
-                        walk(relpath1)
+                        for e in walk(relpath1):
+                            yield e
                 elif name == self.configfile:
                     # load a config file.
                     with open(path1) as fp:
-                        for line in fp:
-                            self.excldb.add_local(relpath1, line.strip())
-        walk('.')
+                        lines = [ line.strip() for line in fp ]
+                        yield (relpath1, lines)
+        return walk('.')
+
+    def _send_config(self, confs):
+        self._recv_phase = 0
+        # Assuming each entry fits in one packet.
+        for (relpath, lines) in confs:
+            keys = path2keys(relpath)
+            k = self._getkey(keys)
+            self.excldb.add_local(k, lines)
+            self._send_obj((keys, lines))
+            self._recv_config()
+        self._send_obj(None)
+        while self._recv_config():
+            pass
         return
+
+    def _recv_config(self):
+        if self._recv_phase != 0: return False
+        # Assuming each entry fits in one packet.
+        obj = self._recv_obj()
+        if obj is None:
+            self._recv_phase = 1
+            return False
+        try:
+            (keys, lines) = obj
+        except ValueError:
+            raise self.ProtocolError
+        k = self._getkey(keys)
+        self.excldb.add_local(k, lines)
+        return True
 
     def _gen_list(self, basedir):
         def walk(relpath0, trashbase=None, trashrel0=None):
@@ -173,6 +203,7 @@ class SyncDir:
             except OSError as e:
                 self.logger.error('walk: not found: %r: %r' % (path0, e))
                 return
+            k = self._getkey(path2keys(relpath0))
             for name in files:
                 path1 = os.path.join(path0, name)
                 relpath1 = os.path.join(relpath0, name)
@@ -189,11 +220,11 @@ class SyncDir:
                         # List trashed files.
                         for e in walk(relpath0, trashbase=relpath0, trashrel0='.'):
                             yield e
-                    elif self.is_dir_valid(path0, name):
+                    elif self.is_dir_valid(k, name):
                         for e in walk(relpath1, trashbase=trashbase, trashrel0=trashrel1):
                             yield e
                 elif (os.path.isfile(path1) and
-                      self.is_file_valid(path0, name)):
+                      self.is_file_valid(k, name)):
                     # is a regular file.
                     try:
                         st = os.stat(path1)
@@ -214,20 +245,19 @@ class SyncDir:
                         pass
         return walk('.')
 
-    def _send_list(self, basedir):
-        send_files = {}
+    def _send_list(self, send_files):
+        self._recv_phase = 0
+        self._recv_files = {}
         # Assuming each entry fits in one packet.
-        for (relpath, trashbase, trashrel, size, mtime, digest) in self._gen_list(basedir):
-            self.logger.debug(' send_list: %r' % relpath)
+        for (relpath, _, _, size, mtime, digest) in send_files.values():
             keys = path2keys(relpath)
-            k = self._getkey(keys)
-            send_files[k] = (relpath, trashbase, trashrel, size, mtime, digest)
+            self.logger.debug(' send_list: %r' % relpath)
             self._send_obj((keys, size, mtime, digest))
             self._recv_list()
         self._send_obj(None)
         while self._recv_list():
             pass
-        return send_files
+        return
 
     def _recv_list(self):
         if self._recv_phase != 0: return False
@@ -341,11 +371,15 @@ class SyncDir:
     def run(self, basedir):
         self.logger.info('listing: %r...' % basedir)
         # read the config files.
-        self._read_config(basedir)
+        self.excldb.clear_locals()
+        self._send_config(self._read_config(basedir))
         # send/recv the file list.
-        self._recv_phase = 0
-        self._recv_files = {}
-        send_files = self._send_list(basedir)
+        send_files = {}
+        for (relpath, trashbase, trashrel, size, mtime, digest) in self._gen_list(basedir):
+            keys = path2keys(relpath)
+            k = self._getkey(keys)
+            send_files[k] = (relpath, trashbase, trashrel, size, mtime, digest)
+        self._send_list(send_files)
         # compute the difference.
         send_new = []
         recv_new = []
