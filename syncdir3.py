@@ -39,9 +39,9 @@ class ExcludeDB:
 
     def add_local(self, k, pats):
         if k in self.localpat:
-            pats0 = self.localpat[dirpath]
+            pats0 = self.localpat[k]
         else:
-            pats0 = self.localpat[dirpath] = {}
+            pats0 = self.localpat[k] = {}
         for pat in pats:
             if pat in pats0: continue
             regex = fnmatch.translate(pat)
@@ -101,7 +101,7 @@ class SyncDir:
 
     def _getkey(self, keys):
         if self.ignorecase:
-            return tuple( v.lower() for v in keys )
+            return keys.lower()
         else:
             return keys
 
@@ -158,7 +158,7 @@ class SyncDir:
                     # load a config file.
                     with open(path1) as fp:
                         lines = [ line.strip() for line in fp ]
-                        yield (relpath1, lines)
+                        yield (relpath0, lines)
         return walk('.')
 
     def _send_config(self, confs):
@@ -168,6 +168,7 @@ class SyncDir:
             keys = path2keys(relpath)
             k = self._getkey(keys)
             self.excldb.add_local(k, lines)
+            self.logger.debug(' send_config: %r: %r' % (keys, lines))
             self._send_obj((keys, lines))
             self._recv_config()
         self._send_obj(None)
@@ -186,6 +187,7 @@ class SyncDir:
             (keys, lines) = obj
         except ValueError:
             raise self.ProtocolError
+        self.logger.debug(' recv_config: %r: %r' % (keys, lines))
         k = self._getkey(keys)
         self.excldb.add_local(k, lines)
         return True
@@ -269,9 +271,9 @@ class SyncDir:
         try:
             (keys, size, mtime, digest) = obj
             relpath = keys2path(keys)
-            self.logger.debug(' recv_list: %r' % relpath)
         except ValueError:
             raise self.ProtocolError
+        self.logger.debug(' recv_list: %r' % relpath)
         k = self._getkey(keys)
         self._recv_files[k] = (relpath, size, mtime, digest)
         return True
@@ -372,7 +374,8 @@ class SyncDir:
         self.logger.info('listing: %r...' % basedir)
         # read the config files.
         self.excldb.clear_locals()
-        self._send_config(self._read_config(basedir))
+        if self.configfile is not None:
+            self._send_config(self._read_config(basedir))
         # send/recv the file list.
         send_files = {}
         for (relpath, trashbase, trashrel, size, mtime, digest) in self._gen_list(basedir):
@@ -386,6 +389,8 @@ class SyncDir:
         send_update = []
         recv_update = []
         trashed = []
+        #self.logger.info('send_files: %r' % sorted(send_files.values()))
+        #self.logger.info('recv_files: %r' % sorted(self._recv_files.values()))
         for (k,(relpath0,trashbase0,trashrel0,size0,mtime0,digest0)) in send_files.items():
             if k in self._recv_files:
                 (relpath1,size1,mtime1,digest1) = self._recv_files[k]
@@ -498,7 +503,7 @@ def main(argv):
     followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
-    configfile = '.ignore'
+    configfile = None
     excldb = ExcludeDB()
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG

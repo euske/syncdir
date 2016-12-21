@@ -1,6 +1,6 @@
 #!/bin/sh
 PYTHON=python3
-SYNCDIR="$PYTHON run_syncdir.py -c../syncdir3.py -i -B_backup -T_trash"
+SYNCDIR="$PYTHON run_syncdir.py -c../syncdir3.py -i -B_backup -T_trash -C_ignore"
 TESTBASE=testdir
 
 # Create test directories
@@ -50,7 +50,7 @@ echo "*** ignoring files"
 echo xxx > $D1/.xxx
 echo yyy > $D1/a.yyy
 echo zzz > $D1/a.zzz
-$SYNCDIR -Iyyy $D1 $D2
+$SYNCDIR -E '*.yyy' $D1 $D2
 [ ! -f $D2/.xxx ] || exit 301
 [ ! -f $D2/a.yyy ] || exit 302
 cmp $D1/a.zzz $D2/a.zzz || exit 303
@@ -79,7 +79,7 @@ sleep 1
 #   D2/a.zzz
 echo "*** updating files"
 cp $D1/foo $TESTDIR/foo
-echo foooo > $D1/foo
+echo fooo > $D1/foo
 cp $D1/bar $TESTDIR/bar
 cp $TESTDIR/bar $D1/bar
 $SYNCDIR $D1 $D2
@@ -138,7 +138,7 @@ sleep 1
 #   D2/a.zzz
 #   D2/_backup/foo.backup.*
 
-# Trashing files
+# Excluding files
 #   D1/foo
 #   D1/bar
 #   D1/ttt/t
@@ -151,6 +151,47 @@ sleep 1
 #   D2/a.yyy
 #   D2/a.zzz
 #   D2/_backup/foo.backup.*
+echo "*** excluding files"
+echo foo > $D1/_ignore
+echo t > $D2/ttt/_ignore
+rm $D1/ttt/t
+echo foooo > $D1/foo
+echo xxxx > $D1/a.zzz
+echo yyyy > $D2/a.zzz
+$SYNCDIR -E '*.zzz' $D1 $D2
+[ ! -f $D1/ttt/t ] || exit 501
+cmp $D1/foo $D2/foo && exit 502
+cmp $D1/a.zzz $D2/a.zzz && exit 503
+rm $D1/_ignore
+rm $D2/ttt/_ignore
+echo t > $D1/ttt/t
+sleep 1
+#   D1/foo
+#   D1/bar
+#   D1/ttt/t
+#   D1/.xxx
+#   D1/a.yyy
+#   D1/a.zzz
+#   D2/foo
+#   D2/bar
+#   D2/ttt/t
+#   D2/a.yyy
+#   D2/a.zzz
+#   D2/_backup/foo.backup.*
+
+# Trashing files
+#   D1/_trash/foo
+#   D1/bar
+#   D1/_trash/ttt/t
+#   D1/.xxx
+#   D1/a.yyy
+#   D1/a.zzz
+#   D2/foo
+#   D2/_trash/bar
+#   D2/ttt/t
+#   D2/a.yyy
+#   D2/a.zzz
+#   D2/_backup/foo.backup.*
 echo "*** trashing files"
 mkdir $D1/_trash
 mkdir $D2/_trash
@@ -158,12 +199,12 @@ mv $D1/foo $D1/_trash/foo
 mv $D1/ttt $D1/_trash/ttt
 mv $D2/bar $D2/_trash/bar
 $SYNCDIR $D1 $D2
-[ ! -f $D1/_trash/foo ] || exit 501
-[ ! -f $D1/_trash/ttt/t ] || exit 502
-[ ! -f $D2/_trash/bar ] || exit 503
-[ ! -f $D2/foo ] || exit 504
-[ ! -f $D2/ttt/t ] || exit 505
-[ ! -f $D1/bar ] || exit 506
+[ ! -f $D1/_trash/foo ] || exit 601
+[ ! -f $D1/_trash/ttt/t ] || exit 602
+[ ! -f $D2/_trash/bar ] || exit 603
+[ ! -f $D2/foo ] || exit 604
+[ ! -f $D2/ttt/t ] || exit 605
+[ ! -f $D1/bar ] || exit 606
 sleep 1
 #   D1/.xxx
 #   D1/a.yyy
