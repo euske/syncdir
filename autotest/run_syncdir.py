@@ -20,7 +20,7 @@ def main(argv):
         (opts, args) = getopt.getopt(argv[1:], 'c:dniE:B:T:C:')
     except getopt.GetoptError:
         return usage()
-    ropts = []
+    ropts = ['-Q','0']
     cmdline = 'syncdir.py'
     for (k, v) in opts:
         if k == '-c':

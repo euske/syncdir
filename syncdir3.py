@@ -70,7 +70,7 @@ class SyncDir:
 
     def __init__(self, logger, fp_send, fp_recv,
                  dryrun=False, configfile=None, excldb=None,
-                 ignorecase=False, followlink=False, 
+                 ignorecase=False, followlink=False, timeskew=0,
                  backupdir=None, trashdir=None, codec='utf-8'):
         self.logger = logger
         self.dryrun = dryrun
@@ -78,6 +78,7 @@ class SyncDir:
         self.excldb = excldb
         self.ignorecase = ignorecase
         self.followlink = followlink
+        self.timeskew = timeskew
         self.backupdir = backupdir
         self.trashdir = trashdir
         self.codec = codec
@@ -405,14 +406,14 @@ class SyncDir:
                     # the two files are the same. do nothing.
                     pass
                 else:
-                    if mtime1 < mtime0:
+                    if mtime1+self.timeskew < mtime0:
                         # the sender file is newer.
                         send_update.append(k)
-                    elif mtime0 < mtime1:
+                    elif mtime0+self.timeskew < mtime1:
                         # the receiver file is newer.
                         recv_update.append(k)
                     else:
-                        # unable to determine the newer file. leave them alone.
+                        # unable to decide which file is newer. leave them alone.
                         pass
             else:
                 if mtime0 is not None:
@@ -484,10 +485,10 @@ def main(argv):
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
                '[-n] [-i] [-E dirs] [-L] [-B backupdir] [-T trashdir] '
-               '[-C configfile] [dir ...]' % argv[0])
+               '[-C configfile] [-Q timeskew] [dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niE:LB:T:C:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niE:LB:T:C:Q:')
     except getopt.GetoptError:
         return usage()
     #
@@ -504,6 +505,7 @@ def main(argv):
     backupdir = '.backup'
     trashdir = '.trash'
     configfile = '.ignore'
+    timeskew = 5
     excldb = ExcludeDB()
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
@@ -540,6 +542,10 @@ def main(argv):
             configfile = v
             ropts.append(k)
             ropts.append(v)
+        elif k == '-Q':
+            timeskew = int(v)
+            ropts.append(k)
+            ropts.append(v)
     if not args: return usage()
     
     logging.basicConfig(level=loglevel, filename=logfile)
@@ -556,7 +562,8 @@ def main(argv):
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
         sync = SyncDir(logger, stdin, stdout,
                        dryrun=dryrun, configfile=configfile, excldb=excldb,
-                       ignorecase=ignorecase, followlink=followlink, 
+                       ignorecase=ignorecase, followlink=followlink,
+                       timeskew=timeskew,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(arg1)
@@ -567,6 +574,7 @@ def main(argv):
         sync = SyncDir(logger, sys.stdout.buffer, sys.stdin.buffer,
                        dryrun=dryrun, configfile=configfile, excldb=excldb,
                        ignorecase=ignorecase, followlink=followlink, 
+                       timeskew=timeskew,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
             sync.run(keys2path(arg1))
