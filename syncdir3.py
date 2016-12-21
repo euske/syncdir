@@ -483,11 +483,11 @@ def main(argv):
     import getopt
     def usage():
         print ('usage: %s [-d] [-l logfile] [-p user@host:port] [-c cmdline] '
-               '[-n] [-i] [-I exts] [-E dirs] [-L] [-B backupdir] [-T trashdir] '
+               '[-n] [-i] [-E dirs] [-L] [-B backupdir] [-T trashdir] '
                '[-C configfile] [dir ...]' % argv[0])
         return 100
     try:
-        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niI:E:LB:T:C:')
+        (opts, args) = getopt.getopt(argv[1:], 'dl:p:c:niE:LB:T:C:')
     except getopt.GetoptError:
         return usage()
     #
@@ -520,19 +520,14 @@ def main(argv):
         elif k == '-i':
             ignorecase = True
             ropts.append(k)
-        elif k == '-I':
-            for ext in v.split(','):
-                excldb.add_global('*.'+ext)
+        elif k == '-L':
+            followlink = True
             ropts.append(k)
-            ropts.append(v)
         elif k == '-E':
             for name in v.split(','):
                 excldb.add_global(name)
             ropts.append(k)
             ropts.append(v)
-        elif k == '-L':
-            followlink = True
-            ropts.append(k)
         elif k == '-B':
             backupdir = v
             ropts.append(k)
