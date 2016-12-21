@@ -5,4 +5,4 @@ test:
 	$(SH) ./run_test.sh
 
 clean:
-	$(RM) -r testdir.*
+	$(RM) -r /tmp/testdir.*

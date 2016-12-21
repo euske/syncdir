@@ -99,7 +99,7 @@ class SyncDir:
             if self.excldb.is_excluded(k, name): return False
         return True
 
-    def _getkey(self, keys):
+    def _normkey(self, keys):
         if self.ignorecase:
             return keys.lower()
         else:
@@ -166,7 +166,7 @@ class SyncDir:
         # Assuming each entry fits in one packet.
         for (relpath, lines) in confs:
             keys = path2keys(relpath)
-            k = self._getkey(keys)
+            k = self._normkey(keys)
             self.excldb.add_local(k, lines)
             self.logger.debug(' send_config: %r: %r' % (keys, lines))
             self._send_obj((keys, lines))
@@ -188,7 +188,7 @@ class SyncDir:
         except ValueError:
             raise self.ProtocolError
         self.logger.debug(' recv_config: %r: %r' % (keys, lines))
-        k = self._getkey(keys)
+        k = self._normkey(keys)
         self.excldb.add_local(k, lines)
         return True
 
@@ -205,7 +205,7 @@ class SyncDir:
             except OSError as e:
                 self.logger.error('walk: not found: %r: %r' % (path0, e))
                 return
-            k = self._getkey(path2keys(relpath0))
+            k = self._normkey(path2keys(relpath0))
             for name in files:
                 path1 = os.path.join(path0, name)
                 relpath1 = os.path.join(relpath0, name)
@@ -270,11 +270,11 @@ class SyncDir:
             return False
         try:
             (keys, size, mtime, digest) = obj
-            relpath = keys2path(keys)
         except ValueError:
             raise self.ProtocolError
+        relpath = keys2path(keys)
         self.logger.debug(' recv_list: %r' % relpath)
-        k = self._getkey(keys)
+        k = self._normkey(keys)
         self._recv_files[k] = (relpath, size, mtime, digest)
         return True
 
@@ -342,8 +342,8 @@ class SyncDir:
             try:
                 self.logger.info('recv: %r (%s)' % (path, size0))
                 if not self.dryrun:
-                    tmppath = os.path.join(os.path.dirname(path),
-                                           'tmp'+binascii.hexlify(digest0).decode('ascii'))
+                    tmpname = 'tmp'+binascii.hexlify(digest0).decode('ascii')
+                    tmppath = os.path.join(os.path.dirname(path), tmpname)
                     self._rfile_fp = open(tmppath, 'wb')
             except (IOError, OSError) as e:
                 self.logger.error('recv: %r: %r' % (path, e))
@@ -380,7 +380,7 @@ class SyncDir:
         send_files = {}
         for (relpath, trashbase, trashrel, size, mtime, digest) in self._gen_list(basedir):
             keys = path2keys(relpath)
-            k = self._getkey(keys)
+            k = self._normkey(keys)
             send_files[k] = (relpath, trashbase, trashrel, size, mtime, digest)
         self._send_list(send_files)
         # compute the difference.
@@ -389,31 +389,31 @@ class SyncDir:
         send_update = []
         recv_update = []
         trashed = []
-        #self.logger.info('send_files: %r' % sorted(send_files.values()))
-        #self.logger.info('recv_files: %r' % sorted(self._recv_files.values()))
         for (k,(relpath0,trashbase0,trashrel0,size0,mtime0,digest0)) in send_files.items():
             if k in self._recv_files:
                 (relpath1,size1,mtime1,digest1) = self._recv_files[k]
-                if digest0 != digest1:
-                    if mtime0 is None and mtime1 is None:
-                        # both files are trashed.
-                        pass
-                    elif mtime1 is None:
-                        # the obsolete receiver file is trashed.
-                        send_update.append(k)
-                    elif mtime0 is None:
-                        # the obsolete sender file is trashed.
-                        recv_update.append(k)
-                    elif mtime1 < mtime0:
+                if mtime0 is None and mtime1 is None:
+                    # both files are trashed.
+                    pass
+                elif mtime0 is None:
+                    # the obsolete sender file will be trashed. do nothing.
+                    pass
+                elif mtime1 is None:
+                    # the obsolete receiver file will be trashed.
+                    trashed.append((os.path.dirname(relpath0), relpath0))
+                elif digest0 == digest1:
+                    # the two files are the same. do nothing.
+                    pass
+                else:
+                    if mtime1 < mtime0:
                         # the sender file is newer.
                         send_update.append(k)
-                    else:
+                    elif mtime0 < mtime1:
                         # the receiver file is newer.
                         recv_update.append(k)
-                else:
-                    if mtime0 is not None and mtime1 is None:
-                        # the receiver file is trashed.
-                        trashed.append((os.path.dirname(relpath0), relpath0))
+                    else:
+                        # unable to determine the newer file. leave them alone.
+                        pass
             else:
                 if mtime0 is not None:
                     send_new.append(k)
@@ -503,7 +503,7 @@ def main(argv):
     followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
-    configfile = None
+    configfile = '.ignore'
     excldb = ExcludeDB()
     for (k, v) in opts:
         if k == '-d': loglevel = logging.DEBUG
