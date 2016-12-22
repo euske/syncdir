@@ -1,6 +1,6 @@
 #!/bin/sh
 PYTHON=python3
-SYNCDIR="$PYTHON run_syncdir.py -c../syncdir3.py -i -B_backup -T_trash -C_ignore"
+SYNCDIR="$PYTHON run_syncdir.py -c../syncdir3.py -i -B_backup -T_trash -C_config"
 TESTBASE=/tmp/testdir
 
 # Create test directories
@@ -152,8 +152,8 @@ sleep 1
 #   D2/a.zzz
 #   D2/_backup/foo.backup.*
 echo "*** excluding files"
-echo foo > $D1/_ignore
-echo t > $D2/ttt/_ignore
+echo -foo > $D1/_config
+echo +x > $D2/ttt/_config
 rm $D1/ttt/t
 echo foooo > $D1/foo
 echo xxxx > $D1/a.zzz
@@ -162,8 +162,8 @@ $SYNCDIR -E '*.zzz' $D1 $D2
 [ ! -f $D1/ttt/t ] || exit 501
 cmp $D1/foo $D2/foo && exit 502
 cmp $D1/a.zzz $D2/a.zzz && exit 503
-rm $D1/_ignore
-rm $D2/ttt/_ignore
+rm $D1/_config
+rm $D2/ttt/_config
 echo t > $D1/ttt/t
 sleep 1
 #   D1/foo

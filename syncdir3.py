@@ -19,6 +19,29 @@ def path2loc(path):
 def loc2path(loc):
     return os.path.sep.join(loc.split(SEP))
 
+def readExcls(dirpath, fp):
+    pol = 0
+    names = []
+    for line in fp:
+        line = line.strip()
+        if line.startswith('+'):
+            if pol < 0:
+                raise ValueError('conflicting: %r' % line)
+            pol = +1
+            names.append(line[1:])
+        elif line.startswith('-'):
+            if 0 < pol:
+                raise ValueError('conflicting: %r' % line)
+            pol = -1
+            names.append(line[1:])
+        else:
+            raise ValueError('invalid: %r' % line)
+    if pol <= 0:
+        return names
+    else:
+        names0 = set(os.listdir(dirpath))
+        return list(names0.difference(names))
+
 
 ##  ExcludeDB
 ##
@@ -159,19 +182,22 @@ class SyncDir:
                 elif name == self.configfile:
                     # load a config file.
                     with open(path1) as fp:
-                        lines = [ line.strip() for line in fp ]
-                        yield (relpath0, lines)
+                        try:
+                            excls = readExcls(path0, fp)
+                            yield (relpath0, excls)
+                        except ValueError as e:
+                            self.logger.error(' read_config: %r: %r' % (path1, e))
         return walk('.')
 
     def _send_config(self, confs):
         self._recv_phase = 0
         # Assuming each entry fits in one packet.
-        for (relpath, lines) in confs:
+        for (relpath, excls) in confs:
             loc = path2loc(relpath)
             k = self._getkey(loc)
-            self.excldb.add_local(k, lines)
-            self.logger.debug(' send_config: %r: %r' % (loc, lines))
-            self._send_obj((loc, lines))
+            self.excldb.add_local(k, excls)
+            self.logger.debug(' send_config: %r: %r' % (loc, excls))
+            self._send_obj((loc, excls))
             self._recv_config()
         self._send_obj(None)
         while self._recv_config():
@@ -186,12 +212,12 @@ class SyncDir:
             self._recv_phase = 1
             return False
         try:
-            (loc, lines) = obj
+            (loc, excls) = obj
         except ValueError:
             raise self.ProtocolError
-        self.logger.debug(' recv_config: %r: %r' % (loc, lines))
+        self.logger.debug(' recv_config: %r: %r' % (loc, excls))
         k = self._getkey(loc)
-        self.excldb.add_local(k, lines)
+        self.excldb.add_local(k, excls)
         return True
 
     def _gen_list(self, basedir):
@@ -505,7 +531,7 @@ def main(argv):
     followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
-    configfile = '.ignore'
+    configfile = '.config'
     timeskew = 5
     excldb = ExcludeDB()
     for (k, v) in opts:
