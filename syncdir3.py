@@ -12,11 +12,12 @@ import struct
 import marshal
 import binascii
 
+# "loc" is an OS-independent pathname.
 SEP = '/'
-def path2keys(path):
+def path2loc(path):
     return SEP.join(path.split(os.path.sep))
-def keys2path(keys):
-    return os.path.sep.join(keys.split(SEP))
+def loc2path(loc):
+    return os.path.sep.join(loc.split(SEP))
 
 
 ##  ExcludeDB
@@ -100,11 +101,11 @@ class SyncDir:
             if self.excldb.is_excluded(k, name): return False
         return True
 
-    def _normkey(self, keys):
+    def _getkey(self, loc):
         if self.ignorecase:
-            return keys.lower()
+            return loc.lower()
         else:
-            return keys
+            return loc
 
     def _send(self, x):
         #self.logger.debug(' send: %r' % x)
@@ -166,11 +167,11 @@ class SyncDir:
         self._recv_phase = 0
         # Assuming each entry fits in one packet.
         for (relpath, lines) in confs:
-            keys = path2keys(relpath)
-            k = self._normkey(keys)
+            loc = path2loc(relpath)
+            k = self._getkey(loc)
             self.excldb.add_local(k, lines)
-            self.logger.debug(' send_config: %r: %r' % (keys, lines))
-            self._send_obj((keys, lines))
+            self.logger.debug(' send_config: %r: %r' % (loc, lines))
+            self._send_obj((loc, lines))
             self._recv_config()
         self._send_obj(None)
         while self._recv_config():
@@ -185,11 +186,11 @@ class SyncDir:
             self._recv_phase = 1
             return False
         try:
-            (keys, lines) = obj
+            (loc, lines) = obj
         except ValueError:
             raise self.ProtocolError
-        self.logger.debug(' recv_config: %r: %r' % (keys, lines))
-        k = self._normkey(keys)
+        self.logger.debug(' recv_config: %r: %r' % (loc, lines))
+        k = self._getkey(loc)
         self.excldb.add_local(k, lines)
         return True
 
@@ -206,7 +207,7 @@ class SyncDir:
             except OSError as e:
                 self.logger.error('walk: not found: %r: %r' % (path0, e))
                 return
-            k = self._normkey(path2keys(relpath0))
+            k = self._getkey(path2loc(relpath0))
             for name in files:
                 path1 = os.path.join(path0, name)
                 relpath1 = os.path.join(relpath0, name)
@@ -253,9 +254,9 @@ class SyncDir:
         self._recv_files = {}
         # Assuming each entry fits in one packet.
         for (relpath, _, _, size, mtime, digest) in send_files.values():
-            keys = path2keys(relpath)
+            loc = path2loc(relpath)
             self.logger.debug(' send_list: %r' % relpath)
-            self._send_obj((keys, size, mtime, digest))
+            self._send_obj((loc, size, mtime, digest))
             self._recv_list()
         self._send_obj(None)
         while self._recv_list():
@@ -270,12 +271,12 @@ class SyncDir:
             self._recv_phase = 1
             return False
         try:
-            (keys, size, mtime, digest) = obj
+            (loc, size, mtime, digest) = obj
         except ValueError:
             raise self.ProtocolError
-        relpath = keys2path(keys)
+        relpath = loc2path(loc)
         self.logger.debug(' recv_list: %r' % relpath)
-        k = self._normkey(keys)
+        k = self._getkey(loc)
         self._recv_files[k] = (relpath, size, mtime, digest)
         return True
 
@@ -380,8 +381,8 @@ class SyncDir:
         # send/recv the file list.
         send_files = {}
         for (relpath, trashbase, trashrel, size, mtime, digest) in self._gen_list(basedir):
-            keys = path2keys(relpath)
-            k = self._normkey(keys)
+            loc = path2loc(relpath)
+            k = self._getkey(loc)
             send_files[k] = (relpath, trashbase, trashrel, size, mtime, digest)
         self._send_list(send_files)
         # compute the difference.
@@ -555,7 +556,7 @@ def main(argv):
         import paramiko
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        rargs = [cmdline]+ropts+list(map(path2keys, args))
+        rargs = [cmdline]+ropts+list(map(path2loc, args))
         logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
         client.connect(host, port, username, allow_agent=True)
         logging.info('exec_command: %r...' % rargs)
@@ -577,7 +578,7 @@ def main(argv):
                        timeskew=timeskew,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
-            sync.run(keys2path(arg1))
+            sync.run(loc2path(arg1))
     return 0
 
 if __name__ == '__main__': sys.exit(main(sys.argv))
