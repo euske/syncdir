@@ -170,16 +170,14 @@ class SyncDir:
                 if not self.followlink and os.path.islink(path1):
                     # is a symlink (and ignored).
                     pass
-                elif name.startswith('.'):
-                    pass
                 elif os.path.isdir(path1):
                     # is a directory.
                     if name == self.backupdir or name == self.trashdir: 
                         pass
-                    else:
+                    elif not name.startswith('.'):
                         for e in walk(relpath1):
                             yield e
-                elif name == self.configfile:
+                elif os.path.isfile(path1) and name == self.configfile:
                     # load a config file.
                     with open(path1) as fp:
                         try:
@@ -531,7 +529,7 @@ def main(argv):
     followlink = False
     backupdir = '.backup'
     trashdir = '.trash'
-    configfile = '.config'
+    configfile = '.sdconfig'
     timeskew = 5
     excldb = ExcludeDB()
     for (k, v) in opts:
