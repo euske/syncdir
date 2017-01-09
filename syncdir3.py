@@ -522,7 +522,7 @@ def main(argv):
     host = None
     port = 22
     username = None
-    cmdline = 'syncdir.py'
+    cmdline = 'syncdir3.py'
     ropts = []
     dryrun = False
     ignorecase = False
