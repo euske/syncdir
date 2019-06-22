@@ -2,7 +2,7 @@
 from setuptools import setup
 
 setup(name='syncdir',
-      version='0.2',
+      version='0.2.1',
       description='Yet another rsync-like program written in Python',
       url='https://github.com/euske/syncdir',
       author='Yusuke Shinyama',
