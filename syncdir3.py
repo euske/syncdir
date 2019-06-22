@@ -116,7 +116,7 @@ class SyncDir:
         if self.excldb is not None:
             if self.excldb.is_excluded(k, name): return False
         return True
-    
+
     def is_file_valid(self, k, name):
         if name.startswith('.'): return False
         if name == self.configfile: return False
@@ -139,7 +139,7 @@ class SyncDir:
         x = self._fp_recv.read(n)
         #self.logger.debug(' recv: %r' % x)
         return x
-    
+
     def _send_obj(self, obj):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(' send_obj: %r' % (obj,))
@@ -155,7 +155,7 @@ class SyncDir:
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(' recv_obj: %r' % (obj,))
         return obj
-    
+
     def _read_config(self, basedir):
         def walk(relpath0):
             path0 = os.path.join(basedir, relpath0)
@@ -172,7 +172,7 @@ class SyncDir:
                     pass
                 elif os.path.isdir(path1):
                     # is a directory.
-                    if name == self.backupdir or name == self.trashdir: 
+                    if name == self.backupdir or name == self.trashdir:
                         pass
                     elif not name.startswith('.'):
                         for e in walk(relpath1):
@@ -354,7 +354,7 @@ class SyncDir:
             return True
         assert self._rfile_bytes is None
         assert self._rfile_fp is None
-        
+
         if self._rfile_queue:
             # setup a new file to receive.
             k = self._recv_obj()
@@ -452,10 +452,6 @@ class SyncDir:
             if k not in send_files:
                 if mtime1 is not None:
                     recv_new.append(k)
-        self.logger.info('sending: %d new, %d update...' %
-                         (len(send_new), len(send_update)))
-        self.logger.info('receiving: %d new, %d update, %d trashed...' %
-                         (len(recv_new), len(recv_update), len(trashed)))
         # deleting files.
         for (backupbase,relpath) in trashed:
             path = os.path.join(basedir, relpath)
@@ -502,6 +498,10 @@ class SyncDir:
                 self.logger.error('send: %r: %r' % (path, e))
         while self._recv_file(basedir):
             pass
+        self.logger.info('sent: %d new, %d update.' %
+                         (len(send_new), len(send_update)))
+        self.logger.info('received: %d new, %d update, %d trashed.' %
+                         (len(recv_new), len(recv_update), len(trashed)))
         return
 
 # main
@@ -572,7 +572,7 @@ def main(argv):
             ropts.append(k)
             ropts.append(v)
     if not args: return usage()
-    
+
     logging.basicConfig(level=loglevel, filename=logfile)
     name = 'SyncDir(%d)' % os.getpid()
     logger = logging.getLogger(name)
@@ -581,7 +581,7 @@ def main(argv):
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         rargs = [cmdline]+ropts+list(map(path2loc, args))
-        logging.info('connecting: %s@%s:%s...' % (username, host, port)) 
+        logging.info('connecting: %s@%s:%s...' % (username, host, port))
         client.connect(host, port, username, allow_agent=True)
         logging.info('exec_command: %r...' % rargs)
         (stdin,stdout,stderr) = client.exec_command(' '.join(rargs))
@@ -598,7 +598,7 @@ def main(argv):
     else:
         sync = SyncDir(logger, sys.stdout.buffer, sys.stdin.buffer,
                        dryrun=dryrun, configfile=configfile, excldb=excldb,
-                       ignorecase=ignorecase, followlink=followlink, 
+                       ignorecase=ignorecase, followlink=followlink,
                        timeskew=timeskew,
                        backupdir=backupdir, trashdir=trashdir)
         for arg1 in args:
